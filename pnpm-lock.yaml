@@ -265,6 +265,18 @@ importers:
 
   packages/db:
     devDependencies:
+      '@askwell/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@electric-sql/pglite':
+        specifier: ^0.6.0
+        version: 0.6.0
+      '@electric-sql/pglite-pgvector':
+        specifier: ^0.1.0
+        version: 0.1.0(@electric-sql/pglite@0.6.0)
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
       eslint:
         specifier: ^9
         version: 9.39.5(jiti@2.7.0)(supports-color@7.2.0)
@@ -363,6 +375,14 @@ packages:
   '@babel/types@7.29.15':
     resolution: {integrity: sha512-/XKpKDakL//LZ66bq1XsZOswuqeI5MZqPLDu18o3XdkU1fNJ7bdPtzgnc4ZNS+bBGHV0FJG8jjb8SwcC3nNVQQ==}
     engines: {node: '>=6.9.0'}
+
+  '@electric-sql/pglite-pgvector@0.1.0':
+    resolution: {integrity: sha512-2iSQwI8av+BI8rnsq6NUT6coXX/Yrc6Qu5unfS9Z4znkUQjk3KS31DsCoU+uQKsb73YUPQ60e8+ZsFAcTecX/A==}
+    peerDependencies:
+      '@electric-sql/pglite': 0.6.0
+
+  '@electric-sql/pglite@0.6.0':
+    resolution: {integrity: sha512-g3tAPFjRLEdN1g5FvawTl4ETo9LtmVwBRUJYnH6Erl6mhlKFRGB2mYhPABffIuXMYxki64mX0Al8U4UFUhuYDQ==}
 
   '@emnapi/core@2.0.0-beta.2':
     resolution: {integrity: sha512-MzCVoWtcg4Pm2B3je5mMvYMvj3MmBKw+fU7vbsJc9/iT8ip6/eYIHo/Dsm/mr+wsHB6SEyJDuxB09Yy6r/8+4A==}
@@ -2863,6 +2883,12 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.29.15
       '@babel/helper-validator-identifier': 7.29.7
+
+  '@electric-sql/pglite-pgvector@0.1.0(@electric-sql/pglite@0.6.0)':
+    dependencies:
+      '@electric-sql/pglite': 0.6.0
+
+  '@electric-sql/pglite@0.6.0': {}
 
   '@emnapi/core@2.0.0-beta.2':
     dependencies:
