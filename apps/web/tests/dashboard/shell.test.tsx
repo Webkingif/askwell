@@ -127,6 +127,14 @@ describe("dashboard pages", () => {
     ).rejects.toThrow("NEXT_REDIRECT /dashboard/projects/p1/knowledge");
   });
 
+  it("titles use APP_NAME", async () => {
+    const { metadata: projects } = await import("../../app/dashboard/page");
+    const { metadata: layout } = await import("../../app/dashboard/layout");
+    expect(projects.title).toBe(`Projects · ${APP_NAME}`);
+    // Child pages (billing, tabs) give a short title; the layout template adds APP_NAME.
+    expect(layout.title).toMatchObject({ template: `%s · ${APP_NAME}` });
+  });
+
   it("/dashboard/projects goes to the list", () => {
     expect(() => ProjectsIndex()).toThrow("NEXT_REDIRECT /dashboard");
   });

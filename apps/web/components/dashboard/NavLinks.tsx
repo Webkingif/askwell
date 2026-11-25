@@ -19,7 +19,10 @@ const listClass: Record<NavLinksVariant, string> = {
   // Row on mobile (top bar), column from md up (sidebar).
   sidebar: "flex items-center gap-1 md:flex-col md:items-stretch",
   // One row; scrolls inside itself on narrow screens, never the page.
-  tabs: "-mb-px flex gap-1 overflow-x-auto [scrollbar-width:none]",
+  // The fade below sm hints that more tabs sit off to the right.
+  tabs:
+    "-mb-px flex gap-1 overflow-x-auto [scrollbar-width:none] " +
+    "[mask-image:linear-gradient(to_right,black_85%,transparent)] sm:[mask-image:none]",
 };
 
 const linkBase =
