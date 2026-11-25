@@ -15,12 +15,13 @@ export function Pricing() {
       title="Start free. Upgrade when it pays off."
     >
       <Reveal>
-        <GlassPanel padding="none" className="overflow-x-auto">
-          <table className="w-full min-w-[20rem] border-collapse text-left text-sm">
+        <GlassPanel padding="none" className="overflow-hidden">
+          {/* Fixed layout below sm so the table always fits 375 px; auto layout on desktop as before. */}
+          <table className="w-full table-fixed border-collapse text-left text-xs sm:table-auto sm:text-sm">
             <caption className="sr-only">Free and Pro plans compared</caption>
             <thead>
               <tr className="border-b border-line">
-                <th scope="col" className="w-2/5 p-4 sm:p-6">
+                <th scope="col" className="w-[36%] p-3 sm:w-2/5 sm:p-6">
                   <span className="sr-only">Feature</span>
                 </th>
                 {PLANS.map((plan) => {
@@ -30,21 +31,25 @@ export function Pricing() {
                       key={plan}
                       scope="col"
                       className={cx(
-                        "p-4 align-top sm:p-6",
+                        "p-3 align-top sm:p-6",
                         plan === "pro" && "bg-subtle",
                       )}
                     >
-                      <span className="flex items-center gap-2 text-base font-semibold">
+                      <span className="flex items-center gap-2 text-sm font-semibold sm:text-base">
                         {PLAN_NAMES[plan]}
                         {plan === "pro" && (
-                          <Badge variant="solid">Popular</Badge>
+                          <span className="hidden sm:inline-flex">
+                            <Badge variant="solid">Popular</Badge>
+                          </span>
                         )}
                       </span>
-                      <span className="mt-2 block font-normal">
-                        <span className="text-2xl font-semibold sm:text-3xl">
+                      <span className="mt-1 block font-normal sm:mt-2">
+                        <span className="block text-xl font-semibold sm:inline sm:text-3xl">
                           {amount}
                         </span>
-                        <span className="text-muted">{per}</span>
+                        <span className="block text-muted sm:inline">
+                          {per}
+                        </span>
                       </span>
                     </th>
                   );
@@ -59,7 +64,7 @@ export function Pricing() {
                 >
                   <th
                     scope="row"
-                    className="px-4 py-3 font-normal text-muted sm:px-6"
+                    className="px-3 py-3 font-normal break-words text-muted sm:px-6"
                   >
                     {row.label}
                   </th>
@@ -67,7 +72,7 @@ export function Pricing() {
                     <td
                       key={plan}
                       className={cx(
-                        "px-4 py-3 font-medium sm:px-6",
+                        "px-3 py-3 font-medium break-words sm:px-6",
                         plan === "pro" && "bg-subtle",
                       )}
                     >
