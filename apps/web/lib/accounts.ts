@@ -1,4 +1,5 @@
 import "server-only";
+import { connection } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { planSchema, type Plan } from "@askwell/shared";
 import { createOwnerClient } from "./supabase/owner";
@@ -28,9 +29,15 @@ export class NotSignedInError extends Error {
  *   inserts, the other does nothing.
  * - The row is read back through the owner client, so RLS scopes it.
  *
- * Errors never include the user ID or key material.
+ * Error messages never include the user ID or key material; the Supabase
+ * error is attached as `cause` for the server log.
  */
 export async function ensureAccount(): Promise<Account> {
+  // A write belongs to a real request, never a prerender. With
+  // cacheComponents, runtime prefetches can resolve auth() (cookies) but
+  // abort fetch() when the prerender ends; connection() waits for an actual
+  // request, so the insert only runs then.
+  await connection();
   const { userId } = await auth();
   if (!userId) throw new NotSignedInError();
 
@@ -41,7 +48,12 @@ export async function ensureAccount(): Promise<Account> {
       { onConflict: "clerk_user_id", ignoreDuplicates: true },
     );
   if (insertError) {
-    throw new Error(`ensureAccount: insert failed (${insertError.code})`);
+    throw new Error(
+      `ensureAccount: insert failed (${insertError.code || "no code"})`,
+      {
+        cause: insertError,
+      },
+    );
   }
 
   const { data, error: readError } = await createOwnerClient()
@@ -50,7 +62,12 @@ export async function ensureAccount(): Promise<Account> {
     .eq("clerk_user_id", userId)
     .maybeSingle();
   if (readError) {
-    throw new Error(`ensureAccount: read failed (${readError.code})`);
+    throw new Error(
+      `ensureAccount: read failed (${readError.code || "no code"})`,
+      {
+        cause: readError,
+      },
+    );
   }
   // The row exists (we just ensured it), so null means RLS hid it: the
   // owner's Clerk token isn't reaching Supabase.

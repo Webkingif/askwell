@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { APP_NAME } from "@askwell/shared";
 
+vi.mock("server-only", () => ({}));
+
 const nav = vi.hoisted(() => ({ pathname: "/dashboard" as string | null }));
 
 vi.mock("next/navigation", () => ({

@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+const connection = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("next/server", () => ({ connection }));
+
 const clerk = vi.hoisted(() => ({ userId: null as string | null }));
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: clerk.userId }),
@@ -152,6 +155,20 @@ describe("ensureAccount", () => {
     expect(db.upserts[0]?.values).toEqual({ clerk_user_id: "user_me" });
     expect(db.ownerFilters).toEqual([["clerk_user_id", "user_me"]]);
     expect(db.rows.get("user_other")?.plan).toBe("pro");
+  });
+
+  it("waits for a real request before touching the database", async () => {
+    signIn("user_a");
+    let release!: () => void;
+    connection.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    const pending = ensureAccount();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(db.upserts).toEqual([]);
+    release();
+    await pending;
+    expect(db.upserts).toHaveLength(1);
   });
 
   it("throws NotSignedInError with no session, and writes nothing", async () => {
