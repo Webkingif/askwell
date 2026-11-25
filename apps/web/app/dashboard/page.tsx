@@ -1,39 +1,29 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
-import { UserButton } from "@clerk/nextjs";
-import { auth } from "@clerk/nextjs/server";
 import { APP_NAME } from "@askwell/shared";
-import { LoadingState } from "../../components/ui";
+import { PageHeader } from "../../components/dashboard";
+import { Button, EmptyState, GlassPanel } from "../../components/ui";
 
-export const metadata: Metadata = {
-  title: `Dashboard · ${APP_NAME}`,
-  robots: { index: false, follow: false },
-};
+// Absolute: the layout's title template only applies to child segments.
+export const metadata: Metadata = { title: `Projects · ${APP_NAME}` };
 
-/** Checks the session here too, not only in proxy.ts. */
-async function SignedInDashboard() {
-  const { userId, redirectToSignIn } = await auth();
-  if (!userId) return redirectToSignIn();
+export default function ProjectsPage() {
   return (
     <>
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <UserButton />
-      </header>
-      <p className="text-sm text-muted">
-        You&apos;re signed in. Projects arrive in the next update.
-      </p>
+      <PageHeader
+        title="Projects"
+        description="Each project is one chat widget for one website."
+      />
+      <GlassPanel padding="lg">
+        <EmptyState
+          title="Create your first project"
+          message="A project holds your info, your widget settings and your conversations. Creating projects is coming soon."
+          action={
+            <Button disabled title="Coming soon">
+              New project
+            </Button>
+          }
+        />
+      </GlassPanel>
     </>
-  );
-}
-
-/** Placeholder so sign-in has somewhere to land. B4 replaces it. */
-export default function DashboardPage() {
-  return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-5 py-8 sm:px-8">
-      <Suspense fallback={<LoadingState title="Loading your dashboard" />}>
-        <SignedInDashboard />
-      </Suspense>
-    </main>
   );
 }
