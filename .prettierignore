@@ -1,0 +1,14 @@
+pnpm-lock.yaml
+node_modules
+.next
+dist
+coverage
+.vercel
+packages/db/types.ts
+# Human-written and HQ-managed files
+docs
+CLAUDE.md
+AGENTS.md
+.jsmhq
+.claude
+.jsmhq-role.md

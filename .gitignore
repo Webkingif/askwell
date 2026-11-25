@@ -1,0 +1,25 @@
+# dependencies
+node_modules
+.pnpm-store
+
+# builds
+.next
+out
+dist
+*.tsbuildinfo
+next-env.d.ts
+
+# tests
+coverage
+
+# env files (never commit secrets)
+.env
+.env*.local
+
+# vercel
+.vercel
+
+# misc
+.DS_Store
+*.pem
+*.log
