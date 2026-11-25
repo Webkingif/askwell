@@ -14,7 +14,7 @@
     "build": "pnpm -r --if-present build",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "db:types": "echo 'db:types is not set up yet: it arrives in Phase 1 (Supabase CLI + SUPABASE_PROJECT_ID). It will run: supabase gen types typescript --project-id \"$SUPABASE_PROJECT_ID\" > packages/db/types.ts' >&2 && exit 1"
+    "db:types": "supabase gen types typescript --project-id \"$SUPABASE_PROJECT_ID\" --schema public > packages/db/types.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9",
