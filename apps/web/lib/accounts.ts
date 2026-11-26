@@ -31,6 +31,8 @@ export class NotSignedInError extends Error {
  *
  * Error messages never include the user ID or key material; the Supabase
  * error is attached as `cause` for the server log.
+ *
+ * Called from the dashboard layout on every load, so it must stay idempotent.
  */
 export async function ensureAccount(): Promise<Account> {
   // A write belongs to a real request, never a prerender. With
