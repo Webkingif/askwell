@@ -111,7 +111,7 @@ export function ChatPanel({
 
   return (
     <div className="surface-light flex h-dvh min-h-0 w-full flex-col bg-bg text-fg">
-      <header className="glass flex h-14 shrink-0 items-center gap-2 rounded-none border-x-0 border-t-0 px-4">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-glass-line bg-glass px-4 shadow-sm backdrop-blur-glass">
         <h1 className="min-w-0 flex-1 truncate text-base font-semibold">
           {config.headerText}
         </h1>
