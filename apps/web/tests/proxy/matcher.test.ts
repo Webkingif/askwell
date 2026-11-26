@@ -13,6 +13,8 @@ describe("proxy matcher (PPW-T11)", () => {
   // Visitor-facing paths must never reach Clerk: in a cross-origin iframe its
   // handshake redirect loops forever.
   it.each([
+    "/", // landing: reads no session, so no Clerk handshake for visitors
+    "/?ref=x",
     "/embed",
     "/embed?key=x",
     "/embed?key=pk_test_0123456789abcdef",
@@ -27,7 +29,6 @@ describe("proxy matcher (PPW-T11)", () => {
   });
 
   it.each([
-    "/",
     "/dashboard",
     "/dashboard/projects/x",
     "/dashboard/billing",
@@ -49,6 +50,7 @@ describe("proxy matcher (PPW-T11)", () => {
 
   it("every skipped path is public in routeAccess", () => {
     for (const path of [
+      "/",
       "/embed",
       "/embed/x",
       "/api/widget/config",
