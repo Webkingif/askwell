@@ -220,7 +220,7 @@ test("the widget works on a plain page on another origin", async ({ page }) => {
   await expect.poll(panelHeight).toBe(expected);
 
   // Typing a message shows typing, then the mock reply.
-  const input = frame.getByLabel("Message");
+  const input = frame.getByRole("textbox", { name: "Message" });
   await input.fill("Hello from another origin <b>hi</b>");
   await input.press("Enter");
   await expect(frame.getByText("Typing…")).toBeAttached();
