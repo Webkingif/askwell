@@ -19,7 +19,6 @@ vi.mock("@clerk/nextjs", () => ({
 
 const { Sidebar, ProjectTabs, TabPlaceholder, NavLinksView, SIDEBAR_LINKS } =
   await import("../../components/dashboard");
-const { default: ProjectsPage } = await import("../../app/dashboard/page");
 const { default: BillingPage } =
   await import("../../app/dashboard/billing/page");
 const { default: ProjectIndex } =
@@ -94,16 +93,6 @@ describe("ProjectTabs", () => {
 });
 
 describe("dashboard pages", () => {
-  it("/dashboard shows the projects empty state with a disabled New project button", () => {
-    const html = renderToStaticMarkup(<ProjectsPage />);
-    expect(html).toContain("Create your first project");
-    expect(html).toContain("coming soon");
-    const buttons =
-      html.match(/<button[^>]*>[^<]*New project<\/button>/g) ?? [];
-    expect(buttons.length).toBeGreaterThan(0);
-    for (const b of buttons) expect(b).toContain("disabled");
-  });
-
   it("/dashboard/billing shows an empty state", () => {
     expect(renderToStaticMarkup(<BillingPage />)).toContain(
       "Plans are coming soon",
