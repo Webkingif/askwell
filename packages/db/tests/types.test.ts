@@ -16,6 +16,15 @@ describe("Database types", () => {
       | "conversations"
       | "messages"
     >();
+    type CreateProject = Database["public"]["Functions"]["create_project"];
+    expectTypeOf<CreateProject["Args"]>().toEqualTypeOf<{
+      p_max_projects: number;
+      p_name: string;
+      p_owner_id: string;
+    }>();
+    expectTypeOf<CreateProject["Returns"]>().toEqualTypeOf<
+      Tables<"projects">
+    >();
     // Defaults make these optional on insert.
     expectTypeOf<TablesInsert<"widget_configs">>().toEqualTypeOf<{
       animation?: string;

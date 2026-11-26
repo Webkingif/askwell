@@ -328,13 +328,14 @@ describe("grants and helpers (project.md §9 Database API)", () => {
     },
   );
 
-  it("the helpers are the only functions in public", async () => {
-    const r = await sb.db.query<{ proname: string }>(
-      "select proname from pg_proc where pronamespace = 'public'::regnamespace order by proname",
+  it("public has only the expected functions; only the RLS helpers are SECURITY DEFINER", async () => {
+    const r = await sb.db.query<{ proname: string; prosecdef: boolean }>(
+      "select proname, prosecdef from pg_proc where pronamespace = 'public'::regnamespace order by proname",
     );
-    expect(r.rows.map((x) => x.proname)).toEqual([
-      "owned_conversation_ids",
-      "owned_project_ids",
+    expect(r.rows).toEqual([
+      { proname: "create_project", prosecdef: false },
+      { proname: "owned_conversation_ids", prosecdef: true },
+      { proname: "owned_project_ids", prosecdef: true },
     ]);
   });
 
