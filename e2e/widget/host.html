@@ -1,0 +1,40 @@
+<!doctype html>
+<!--
+  A plain customer page on another origin. serve.mjs fills it at
+  request time (the SNIPPET marker in the body) with the install snippet.
+  Never commit a key here.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Customer site</title>
+    <style>
+      /* Loud global styles: none may reach the widget, and the widget must
+         not change them. */
+      * {
+        font-family: Georgia, serif;
+      }
+      body {
+        margin: 24px;
+        background: rgb(255, 250, 240);
+        color: rgb(40, 40, 120);
+      }
+      button {
+        background: rgb(0, 128, 0) !important;
+        color: rgb(255, 255, 255);
+        font-size: 20px;
+        border-radius: 0;
+      }
+      div {
+        border: 3px solid rgb(255, 0, 0);
+      }
+    </style>
+  </head>
+  <body>
+    <h1 id="title">Customer site</h1>
+    <button id="styled" type="button">Their own button</button>
+    <div id="box">Their own box</div>
+    {{SNIPPET}}
+  </body>
+</html>
