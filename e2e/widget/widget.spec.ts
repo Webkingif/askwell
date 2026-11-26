@@ -10,6 +10,15 @@ import {
 } from "@playwright/test";
 
 const PREVIEW_URL = (process.env.PREVIEW_URL ?? "").replace(/\/+$/, "");
+/**
+ * Where the snippet's widget.js comes from. The Install tab on a preview
+ * points at the per-deployment URL (VERCEL_URL), which can differ from the
+ * branch alias in PREVIEW_URL, so read it from the snippet.
+ */
+const APP_ORIGIN = (() => {
+  const src = process.env.WIDGET_SNIPPET?.match(/\ssrc="([^"]+)"/)?.[1];
+  return src ? new URL(src).origin : PREVIEW_URL;
+})();
 const SECRET = process.env.VERCEL_AUTOMATION_BYPASS_SECRET ?? "";
 const HAS_KEY = Boolean(process.env.WIDGET_KEY || process.env.WIDGET_SNIPPET);
 const MOCK_REPLY = "Thanks! Real answers arrive soon.";
@@ -26,14 +35,16 @@ test.beforeAll(() => {
 // so this adds no CORS preflight, and no app code changes.
 test.beforeEach(async ({ context }) => {
   if (!SECRET) return;
-  await context.route(`${PREVIEW_URL}/**`, (route) =>
-    route.continue({
-      headers: {
-        ...route.request().headers(),
-        "x-vercel-protection-bypass": SECRET,
-      },
-    }),
-  );
+  for (const origin of new Set([PREVIEW_URL, APP_ORIGIN])) {
+    await context.route(`${origin}/**`, (route) =>
+      route.continue({
+        headers: {
+          ...route.request().headers(),
+          "x-vercel-protection-bypass": SECRET,
+        },
+      }),
+    );
+  }
 });
 
 /**
@@ -118,7 +129,7 @@ async function waitForShadow(page: Page): Promise<Shadow> {
 }
 
 function embedFrame(page: Page): Frame | undefined {
-  return page.frames().find((f) => f.url().startsWith(`${PREVIEW_URL}/embed`));
+  return page.frames().find((f) => f.url().startsWith(`${APP_ORIGIN}/embed`));
 }
 
 async function hostStyles(page: Page) {
@@ -185,13 +196,28 @@ test("the widget works on a plain page on another origin", async ({ page }) => {
   expect(await shadow.isOpen()).toBe(true);
   // A frame the browser couldn't load shows chrome-error://, not /embed.
   await expect
-    .poll(() => page.frames().map((f) => f.url()).filter((u) => u !== page.url()))
-    .toEqual([expect.stringContaining(`${PREVIEW_URL}/embed?key=`)]);
+    .poll(() =>
+      page
+        .frames()
+        .map((f) => f.url())
+        .filter((u) => u !== page.url()),
+    )
+    .toEqual([expect.stringContaining(`${APP_ORIGIN}/embed?key=`)]);
   const frame = embedFrame(page)!;
 
-  // The panel got the loader's handshake: its close button shows.
+  // The panel got the loader's handshake on the first open: its close
+  // button shows (PPW-T13).
   const close = frame.getByRole("button", { name: "Close chat" });
-  await expect(close).toBeVisible();
+  await expect(close).toBeVisible({ timeout: 5_000 });
+
+  // The panel's ack (askwell:resize with its own height) doesn't shrink it.
+  const panelHeight = () =>
+    shadow.call<number>(
+      ".panel",
+      "function(){return Math.round(this.getBoundingClientRect().height)}",
+    );
+  const expected = Math.min(600, page.viewportSize()!.height - 112);
+  await expect.poll(panelHeight).toBe(expected);
 
   // Typing a message shows typing, then the mock reply.
   const input = frame.getByLabel("Message");

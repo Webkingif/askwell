@@ -14,10 +14,13 @@
     "build": "pnpm -r --if-present build",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "db:types": "supabase gen types typescript --project-id \"$SUPABASE_PROJECT_ID\" --schema public > packages/db/types.ts"
+    "db:types": "supabase gen types typescript --project-id \"$SUPABASE_PROJECT_ID\" --schema public > packages/db/types.ts",
+    "e2e:widget": "tsc -p e2e/widget && playwright test -c e2e/widget/playwright.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9",
+    "@playwright/test": "^1.65.1",
+    "@types/node": "^26.6.6",
     "eslint": "^9",
     "prettier": "^3.10.1",
     "typescript": "^5",
