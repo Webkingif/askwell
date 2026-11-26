@@ -5,7 +5,14 @@ import {
   type WidgetConfigResponse,
 } from "@askwell/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { boot, findScript, resetBootFlag, type Widget } from "./index";
+import {
+  HANDSHAKE_INTERVAL_MS,
+  HANDSHAKE_TIMEOUT_MS,
+  boot,
+  findScript,
+  resetBootFlag,
+  type Widget,
+} from "./index";
 
 const APP = "https://app.example.com";
 const KEY = "pk_test_0123456789abcdef";
@@ -332,6 +339,99 @@ describe("messages", () => {
     for (const call of post.mock.calls) {
       expect(call).toEqual([{ type: "askwell:opened" }, APP]);
     }
+  });
+
+  describe("opened handshake (PPW-T13)", () => {
+    const OPENED = [{ type: "askwell:opened" }, APP];
+    const ACK = { type: "askwell:resize", height: 600 };
+
+    async function loaded() {
+      const ctx = await openWidget();
+      vi.useFakeTimers();
+      ctx.widget.iframe!.dispatchEvent(new Event("load"));
+      return { ...ctx, post: vi.mocked(ctx.source.postMessage) };
+    }
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("re-sends opened every interval after load until the panel acks", async () => {
+      const { source, post } = await loaded();
+      expect(post).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(HANDSHAKE_INTERVAL_MS * 3);
+      expect(post).toHaveBeenCalledTimes(4);
+      sendMessage(ACK, APP, source);
+      vi.advanceTimersByTime(HANDSHAKE_TIMEOUT_MS);
+      expect(post).toHaveBeenCalledTimes(4);
+      for (const call of post.mock.calls) expect(call).toEqual(OPENED);
+    });
+
+    it("any valid panel message counts as the ack", async () => {
+      const { source, post } = await loaded();
+      sendMessage({ type: "askwell:unread", count: 0 }, APP, source);
+      vi.advanceTimersByTime(HANDSHAKE_TIMEOUT_MS);
+      expect(post).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ["another origin", "https://evil.example", "frame"],
+      ["another window", APP, "window"],
+      ["an invalid message", APP, "frame", { type: "askwell:resize" }],
+    ])("ignores an ack from %s", async (_, origin, from, data = ACK) => {
+      const { source, post } = await loaded();
+      sendMessage(data, origin, from === "frame" ? source : window);
+      vi.advanceTimersByTime(HANDSHAKE_INTERVAL_MS * 2);
+      expect(post).toHaveBeenCalledTimes(3);
+    });
+
+    it("stops when the panel closes", async () => {
+      const { widget, post } = await loaded();
+      widget.close();
+      vi.advanceTimersByTime(HANDSHAKE_TIMEOUT_MS);
+      expect(post).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops on destroy", async () => {
+      const { widget, post } = await loaded();
+      widget.destroy();
+      vi.advanceTimersByTime(HANDSHAKE_TIMEOUT_MS);
+      expect(post).toHaveBeenCalledTimes(1);
+    });
+
+    it("gives up after the timeout", async () => {
+      const { post } = await loaded();
+      vi.advanceTimersByTime(HANDSHAKE_TIMEOUT_MS);
+      const sent = post.mock.calls.length;
+      // The first send plus one per interval (the last tick may lose the race
+      // with the give-up timer).
+      const ticks = HANDSHAKE_TIMEOUT_MS / HANDSHAKE_INTERVAL_MS;
+      expect(sent).toBeGreaterThanOrEqual(ticks);
+      expect(sent).toBeLessThanOrEqual(ticks + 1);
+      vi.advanceTimersByTime(HANDSHAKE_TIMEOUT_MS * 2);
+      expect(post).toHaveBeenCalledTimes(sent);
+    });
+
+    it("starts again on each re-open, until acked", async () => {
+      const { widget, source, post } = await loaded();
+      sendMessage(ACK, APP, source);
+      widget.close();
+      post.mockClear();
+      widget.open();
+      expect(post).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(HANDSHAKE_INTERVAL_MS);
+      expect(post).toHaveBeenCalledTimes(2);
+      sendMessage(ACK, APP, source);
+      vi.advanceTimersByTime(HANDSHAKE_TIMEOUT_MS);
+      expect(post).toHaveBeenCalledTimes(2);
+    });
+
+    it("doesn't send before the iframe has loaded", async () => {
+      const { source } = await openWidget();
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(HANDSHAKE_TIMEOUT_MS);
+      expect(source.postMessage).not.toHaveBeenCalled();
+    });
   });
 
   it("destroy removes the listener and the host", async () => {

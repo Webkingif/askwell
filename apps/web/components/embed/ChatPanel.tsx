@@ -57,6 +57,10 @@ export function ChatPanel({
           unreadRef.current = 0;
           link.send({ type: "askwell:unread", count: 0 });
         }
+        // Ack, so the loader stops re-sending `opened`. Our height is the
+        // frame's, so this resize changes nothing on the host page.
+        const height = Math.round(window.innerHeight);
+        if (height > 0) link.send({ type: "askwell:resize", height });
         inputRef.current?.focus({ preventScroll: true });
       }
     });
