@@ -20,6 +20,14 @@ const BOOTED = Symbol.for("askwell.widget");
 const HOST_TAG = "askwell-widget";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+/**
+ * The panel may not be listening yet when the iframe's `load` fires (React
+ * hydrates after it), so `askwell:opened` is re-sent until the panel answers
+ * with any valid message (it acks with `askwell:resize`), or gives up.
+ */
+export const HANDSHAKE_INTERVAL_MS = 200;
+export const HANDSHAKE_TIMEOUT_MS = 5000;
+
 export interface Widget {
   host: HTMLElement;
   root: ShadowRoot;
@@ -123,11 +131,30 @@ export function render(
 
   let iframe: HTMLIFrameElement | null = null;
   let isOpen = false;
+  let retryTimer: ReturnType<typeof setInterval> | null = null;
+  let giveUpTimer: ReturnType<typeof setTimeout> | null = null;
 
   const post = (msg: LoaderToPanelMessage) => {
     // Target the app origin, never "*". If the frame navigated elsewhere,
     // the browser drops the message.
     iframe?.contentWindow?.postMessage(msg, origin);
+  };
+
+  const stopHandshake = () => {
+    if (retryTimer !== null) clearInterval(retryTimer);
+    if (giveUpTimer !== null) clearTimeout(giveUpTimer);
+    retryTimer = giveUpTimer = null;
+  };
+
+  /** Sends `opened` now, then every interval until acked, closed or timed out. */
+  const startHandshake = () => {
+    stopHandshake();
+    post({ type: "askwell:opened" });
+    retryTimer = setInterval(
+      () => post({ type: "askwell:opened" }),
+      HANDSHAKE_INTERVAL_MS,
+    );
+    giveUpTimer = setTimeout(stopHandshake, HANDSHAKE_TIMEOUT_MS);
   };
 
   const setUnread = (count: number) => {
@@ -146,13 +173,14 @@ export function render(
       iframe.title = config.headerText || config.label;
       iframe.setAttribute("allow", "clipboard-write");
       iframe.addEventListener("load", () => {
-        if (isOpen) post({ type: "askwell:opened" });
+        if (isOpen) startHandshake();
       });
       panel.appendChild(iframe);
+      isOpen = true;
     } else {
-      post({ type: "askwell:opened" });
+      isOpen = true;
+      startHandshake();
     }
-    isOpen = true;
     panel.classList.add("open");
     button.setAttribute("aria-expanded", "true");
     setUnread(0);
@@ -161,6 +189,7 @@ export function render(
   const close = () => {
     if (!isOpen) return;
     isOpen = false;
+    stopHandshake();
     panel.classList.remove("open");
     button.setAttribute("aria-expanded", "false");
   };
@@ -170,6 +199,8 @@ export function render(
     if (!iframe || event.source !== iframe.contentWindow) return;
     const msg: unknown = event.data;
     if (!isPanelToLoaderMessage(msg)) return;
+    // Any valid message from our panel means it's listening.
+    stopHandshake();
     switch (msg.type) {
       case "askwell:close":
         close();
@@ -202,6 +233,7 @@ export function render(
     open,
     close,
     destroy() {
+      stopHandshake();
       win.removeEventListener("message", onMessage);
       host.remove();
     },
