@@ -7,5 +7,6 @@ export * from "./constants";
 export * from "./enums";
 export * from "./plans";
 export * from "./widget";
+export * from "./embed";
 export * from "./schemas";
 export * from "./api";
