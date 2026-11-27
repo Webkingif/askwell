@@ -10,14 +10,19 @@ import {
 import { useEffect, useReducer, useRef, useState, type FormEvent } from "react";
 import { cx } from "../ui";
 import {
-  SEND_ERROR,
   chatReducer,
   cleanMessage,
   initialChatState,
   type ChatMessage,
+  type ChatNotice,
   type ChatState,
 } from "./chat-state";
-import { getReply as defaultGetReply, type GetReply } from "./get-reply";
+import {
+  NOTICES,
+  ReplyError,
+  getReply as defaultGetReply,
+  type GetReply,
+} from "./get-reply";
 import { connectToParent, type ParentLink } from "./parent-link";
 import { browserStorage, getVisitorId } from "./visitor";
 
@@ -70,7 +75,7 @@ export function ChatPanel({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [state.messages.length, state.typing]);
+  }, [state.messages.length, state.typing, state.notice]);
 
   const close = () => {
     if (linkRef.current?.send({ type: "askwell:close" })) {
@@ -78,12 +83,7 @@ export function ChatPanel({
     }
   };
 
-  const send = async (event: FormEvent) => {
-    event.preventDefault();
-    const text = cleanMessage(draft);
-    if (!text || state.typing) return;
-    setDraft("");
-    dispatch({ type: "sent", id: crypto.randomUUID(), text });
+  const requestReply = async (text: string) => {
     visitorIdRef.current ??= getVisitorId(browserStorage());
     try {
       const res = await getReply({
@@ -105,9 +105,34 @@ export function ChatPanel({
           count: unreadRef.current,
         });
       }
-    } catch {
-      dispatch({ type: "failed", error: SEND_ERROR });
+    } catch (err) {
+      const failure =
+        err instanceof ReplyError
+          ? err.failure
+          : { notice: NOTICES.failed, retry: true, resetConversation: false };
+      dispatch({
+        type: "failed",
+        notice: failure.notice,
+        retry: failure.retry,
+        resetConversation: failure.resetConversation,
+      });
     }
+  };
+
+  const send = async (event: FormEvent) => {
+    event.preventDefault();
+    const text = cleanMessage(draft);
+    if (!text || state.typing) return;
+    setDraft("");
+    dispatch({ type: "sent", id: crypto.randomUUID(), text });
+    await requestReply(text);
+  };
+
+  const retry = async () => {
+    const text = state.notice?.retryText;
+    if (!text || state.typing) return;
+    dispatch({ type: "retried" });
+    await requestReply(text);
   };
 
   const canSend = cleanMessage(draft) !== null && !state.typing;
@@ -149,6 +174,9 @@ export function ChatPanel({
             {state.messages.map((m) => (
               <MessageBubble key={m.id} message={m} />
             ))}
+            {state.notice && (
+              <NoticeBubble notice={state.notice} onRetry={retry} />
+            )}
             {state.typing && <TypingBubble />}
           </ul>
         )}
@@ -159,11 +187,6 @@ export function ChatPanel({
         onSubmit={send}
         className="shrink-0 border-t border-line bg-bg px-3 pt-3 pb-2"
       >
-        {state.error && (
-          <p role="alert" className="mb-2 px-1 text-xs font-medium text-fg">
-            {state.error}
-          </p>
-        )}
         <div className="flex items-center gap-2">
           <label htmlFor="embed-message" className="sr-only">
             Message
@@ -230,6 +253,34 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         <span className="sr-only">{mine ? "You: " : "Bot: "}</span>
         {message.text}
       </p>
+    </li>
+  );
+}
+
+/** Why a send failed, styled like a bot reply but not saved as one. */
+function NoticeBubble({
+  notice,
+  onRetry,
+}: {
+  notice: ChatNotice;
+  onRetry: () => void;
+}) {
+  return (
+    <li className="flex animate-fade-in justify-start" role="alert">
+      <div className="glass max-w-[85%] rounded-lg rounded-bl-sm px-3 py-2 text-sm leading-relaxed">
+        <p className="break-words whitespace-pre-wrap text-muted">
+          {notice.text}
+        </p>
+        {notice.retryText !== null && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="focus-ring mt-1 rounded-sm text-sm font-medium text-fg underline underline-offset-2 hover:opacity-80"
+          >
+            Try again
+          </button>
+        )}
+      </div>
     </li>
   );
 }

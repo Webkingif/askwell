@@ -3,19 +3,12 @@ import {
   VISITOR_ID_STORAGE_KEY,
   widgetChatRequestSchema,
 } from "@askwell/shared";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  SEND_ERROR,
   chatReducer,
   cleanMessage,
   initialChatState,
 } from "../../components/embed/chat-state";
-import {
-  MOCK_DELAY_MAX,
-  MOCK_DELAY_MIN,
-  MOCK_REPLY,
-  getReply,
-} from "../../components/embed/get-reply";
 import {
   connectToParent,
   type LinkWindow,
@@ -92,7 +85,7 @@ describe("chat state", () => {
     s = chatReducer(s, {
       type: "replied",
       id: "2",
-      text: MOCK_REPLY,
+      text: "Hello!",
       conversationId: "c1",
     });
     expect(s.typing).toBe(false);
@@ -100,17 +93,51 @@ describe("chat state", () => {
     expect(s.messages.map((m) => m.role)).toEqual(["visitor", "bot"]);
   });
 
-  it("a failed send stops typing and shows an error; the next send clears it", () => {
+  it("a failed send stops typing and shows a notice; the next send clears it", () => {
     let s = chatReducer(initialChatState, {
       type: "sent",
       id: "1",
       text: "hi",
     });
-    s = chatReducer(s, { type: "failed", error: SEND_ERROR });
+    s = chatReducer(s, { type: "failed", notice: "Oops.", retry: true });
     expect(s.typing).toBe(false);
-    expect(s.error).toBe(SEND_ERROR);
+    expect(s.notice).toEqual({ text: "Oops.", retryText: "hi" });
     s = chatReducer(s, { type: "sent", id: "2", text: "again" });
-    expect(s.error).toBeNull();
+    expect(s.notice).toBeNull();
+  });
+
+  it("a notice that can't be retried has no retry text", () => {
+    let s = chatReducer(initialChatState, { type: "sent", id: "1", text: "x" });
+    s = chatReducer(s, { type: "failed", notice: "No.", retry: false });
+    expect(s.notice).toEqual({ text: "No.", retryText: null });
+  });
+
+  it("retry clears the notice and types again, without a new bubble", () => {
+    let s = chatReducer(initialChatState, {
+      type: "sent",
+      id: "1",
+      text: "hi",
+    });
+    s = chatReducer(s, { type: "failed", notice: "Oops.", retry: true });
+    s = chatReducer(s, { type: "retried" });
+    expect(s).toMatchObject({ typing: true, notice: null });
+    expect(s.messages).toHaveLength(1);
+  });
+
+  it("a 404 failure forgets the conversation; others keep it", () => {
+    let s = chatReducer(
+      { ...initialChatState, conversationId: "c1" },
+      { type: "sent", id: "1", text: "hi" },
+    );
+    const kept = chatReducer(s, { type: "failed", notice: "x", retry: true });
+    expect(kept.conversationId).toBe("c1");
+    s = chatReducer(s, {
+      type: "failed",
+      notice: "x",
+      retry: true,
+      resetConversation: true,
+    });
+    expect(s.conversationId).toBeUndefined();
   });
 
   it("cleanMessage trims and enforces the length limit", () => {
@@ -120,34 +147,6 @@ describe("chat state", () => {
       MAX_MESSAGE_LENGTH,
     );
     expect(cleanMessage("x".repeat(MAX_MESSAGE_LENGTH + 1))).toBeNull();
-  });
-});
-
-describe("getReply (mock)", () => {
-  afterEach(() => vi.useRealTimers());
-
-  it("answers with the fixed reply after 600–900 ms and keeps the conversation", async () => {
-    vi.useFakeTimers();
-    const req = {
-      key: "pk_test_0123456789abcdef",
-      visitorId: crypto.randomUUID(),
-      message: "hi",
-    };
-    let done = false;
-    const p = getReply(req).then((r) => {
-      done = true;
-      return r;
-    });
-    await vi.advanceTimersByTimeAsync(MOCK_DELAY_MIN - 1);
-    expect(done).toBe(false);
-    await vi.advanceTimersByTimeAsync(MOCK_DELAY_MAX - MOCK_DELAY_MIN + 1);
-    const res = await p;
-    expect(res.reply).toBe(MOCK_REPLY);
-    expect(res.conversationId).toMatch(UUID);
-
-    const again = getReply({ ...req, conversationId: res.conversationId });
-    await vi.advanceTimersByTimeAsync(MOCK_DELAY_MAX);
-    expect((await again).conversationId).toBe(res.conversationId);
   });
 });
 
