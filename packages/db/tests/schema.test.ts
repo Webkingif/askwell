@@ -333,9 +333,13 @@ describe("grants and helpers (project.md §9 Database API)", () => {
       "select proname, prosecdef from pg_proc where pronamespace = 'public'::regnamespace order by proname",
     );
     expect(r.rows).toEqual([
+      { proname: "consume_message", prosecdef: false },
       { proname: "create_project", prosecdef: false },
+      { proname: "match_chunks", prosecdef: false },
       { proname: "owned_conversation_ids", prosecdef: true },
       { proname: "owned_project_ids", prosecdef: true },
+      { proname: "reserve_knowledge_source", prosecdef: false },
+      { proname: "save_chat_turn", prosecdef: false },
     ]);
   });
 
