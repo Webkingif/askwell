@@ -1,6 +1,7 @@
 import type { PostHog } from "posthog-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  NAVIGATION_WAIT_MS,
   posthogOptions,
   resetAnalyticsForTests,
   setAnalyticsUser,
@@ -172,5 +173,56 @@ describe("trackClient", () => {
     await startAnalytics("/embed", embed.d);
     trackClient("snippet_copied", { projectId: "p1" });
     expect(embed.ph.capture).not.toHaveBeenCalled();
+  });
+});
+
+describe("a client-side move into the dashboard", () => {
+  it("waits for the URL to reach /dashboard before init, so the first pageview isn't /sign-in", async () => {
+    const { ph, d } = deps();
+    // onRouterTransitionStart fires while the URL still says /sign-in.
+    let path = "/sign-in";
+    const pathAtInit: string[] = [];
+    ph.init.mockImplementation(() => pathAtInit.push(path));
+    let ticks = 0;
+    const sleep = vi.fn(async () => {
+      if (++ticks === 3) path = "/dashboard";
+    });
+    await startAnalytics("/dashboard", {
+      ...d,
+      currentPath: () => path,
+      sleep,
+    });
+    expect(ph.init).toHaveBeenCalledTimes(1);
+    expect(pathAtInit).toEqual(["/dashboard"]);
+    expect(sleep).toHaveBeenCalledTimes(3);
+  });
+
+  it("doesn't start when the move ends somewhere untracked, and a later move still can", async () => {
+    const { ph, d } = deps();
+    const sleep = vi.fn(async () => {});
+    await expect(
+      startAnalytics("/dashboard", {
+        ...d,
+        currentPath: () => "/sign-in",
+        sleep,
+      }),
+    ).resolves.toBeNull();
+    expect(ph.init).not.toHaveBeenCalled();
+    // It gave up after NAVIGATION_WAIT_MS.
+    expect(sleep).toHaveBeenCalledTimes(NAVIGATION_WAIT_MS / 50);
+
+    await startAnalytics("/dashboard", {
+      ...d,
+      currentPath: () => "/dashboard",
+    });
+    expect(ph.init).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts at once on a full page load (the URL already matches)", async () => {
+    const { ph, d } = deps();
+    const sleep = vi.fn(async () => {});
+    await startAnalytics("/", { ...d, currentPath: () => "/", sleep });
+    expect(ph.init).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
   });
 });
