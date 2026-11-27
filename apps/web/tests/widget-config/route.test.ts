@@ -58,6 +58,22 @@ vi.mock("../../lib/supabase/service", () => ({
   }),
 }));
 
+const protect = vi.hoisted(() => ({
+  result: { allowed: true } as
+    { allowed: true } | { allowed: false; reason: "rate_limit" | "injection" },
+  calls: [] as { request: Request; options: Record<string, unknown> }[],
+}));
+
+vi.mock("../../lib/arcjet/protect", () => ({
+  protectWidgetRequest: async (
+    request: Request,
+    options: Record<string, unknown>,
+  ) => {
+    protect.calls.push({ request, options });
+    return protect.result;
+  },
+}));
+
 const route = await import("../../app/api/widget/config/route");
 const { getWidgetConfigByKey } = await import("../../lib/widget-config");
 
@@ -97,6 +113,8 @@ const get = (query: string) =>
   route.GET(new NextRequest(`http://localhost/api/widget/config${query}`));
 
 beforeEach(() => {
+  protect.result = { allowed: true };
+  protect.calls = [];
   db.projects.clear();
   db.error = null;
   db.queries = [];
@@ -105,6 +123,36 @@ beforeEach(() => {
 });
 
 describe("GET /api/widget/config", () => {
+  it("rate limits with Arcjet on the config route and the public key", async () => {
+    const res = await get(`?key=${PRO_KEY}`);
+    expect(res.status).toBe(200);
+    expect(protect.calls).toHaveLength(1);
+    expect(protect.calls[0].options).toEqual({
+      route: "config",
+      publicKey: PRO_KEY,
+    });
+    expect(protect.calls[0].request.url).toContain(`key=${PRO_KEY}`);
+  });
+
+  it("returns 429 rate_limited with the CORS headers when blocked", async () => {
+    protect.result = { allowed: false, reason: "rate_limit" };
+    const res = await get(`?key=${PRO_KEY}`);
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({
+      error: { code: "rate_limited", message: expect.any(String) },
+    });
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    // Blocked before the database.
+    expect(db.queries).toHaveLength(0);
+  });
+
+  it("does not call Arcjet for a malformed key", async () => {
+    const res = await get("?key=nope");
+    expect(res.status).toBe(404);
+    expect(protect.calls).toHaveLength(0);
+  });
+
   it("Free gets the defaults and the badge, whatever is saved", async () => {
     const res = await get(`?key=${FREE_KEY}`);
     expect(res.status).toBe(200);
