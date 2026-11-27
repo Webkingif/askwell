@@ -10,10 +10,11 @@ import {
 } from "./prompt";
 
 /**
- * Hydrogen defaults to HIGH thinking. A short answer from 5 chunks needs
- * little reasoning, and thinking tokens are billed as output.
+ * The lowest level Flash-Lite accepts (also its default; it can't be turned
+ * off). A short answer from 5 chunks needs little reasoning, and thinking
+ * tokens count as output. Sent explicitly so a new default can't raise it.
  */
-export const CHAT_THINKING_LEVEL = ThinkingLevel.LOW;
+export const CHAT_THINKING_LEVEL = ThinkingLevel.MINIMAL;
 
 export type Answer = {
   reply: string;
@@ -45,8 +46,8 @@ export async function answerFromChunks(
   const response = await ai.models.generateContent({
     model: CHAT_MODEL,
     contents: buildUserPrompt(question, chunks),
-    // No temperature: Gemini 4 ignores sampling parameters and Google says
-    // to remove them. The system prompt keeps answers to the chunks.
+    // No temperature: the model's default is fine, and the system prompt
+    // keeps answers to the chunks.
     config: {
       systemInstruction: SYSTEM_PROMPT,
       thinkingConfig: { thinkingLevel: CHAT_THINKING_LEVEL },

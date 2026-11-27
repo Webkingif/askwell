@@ -13,9 +13,10 @@ export const EMBEDDING_MODEL = "gemini-embedding-001";
 export const EMBEDDING_DIMENSIONS = 1536;
 
 /**
- * Chat model: the latest stable Gemini Flash-line model. Google calls
- * gemini-4-hydrogen "the recommended upgrade from Gemini 3.8 Flash", on the
- * free tier (aistudio.google.com/docs/whats-new-gemini-4-hydrogen). The
- * product owner chose it on 2026-11-27. Gemini 4 ignores `temperature`.
+ * Chat model: the newest stable Gemini Flash-Lite, chosen for its free-tier
+ * daily limit (product owner, 2026-11-27). gemini-4-hydrogen's free tier
+ * allowed 20 answers a day per Google project, shared by every customer
+ * project. Free tier for this model: 15 requests a minute per Google
+ * project (a 429's quotaValue); the daily limit is in docs/project.md §3.
  */
-export const CHAT_MODEL = "gemini-4-hydrogen";
+export const CHAT_MODEL = "gemini-3.5-flash-lite";

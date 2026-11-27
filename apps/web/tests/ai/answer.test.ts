@@ -38,10 +38,9 @@ describe("answerFromChunks", () => {
     const [args] = sdk.generateContent.mock.calls[0];
     expect(args.model).toBe(CHAT_MODEL);
     expect(args.config.systemInstruction).toBe(SYSTEM_PROMPT);
-    // Gemini 4 ignores sampling parameters; Google says to remove them.
     expect(args.config).not.toHaveProperty("temperature");
-    // Hydrogen defaults to HIGH; a support answer needs LOW.
-    expect(args.config.thinkingConfig).toEqual({ thinkingLevel: "LOW" });
+    // The lowest level Flash-Lite accepts; no thinkingBudget.
+    expect(args.config.thinkingConfig).toEqual({ thinkingLevel: "MINIMAL" });
     expect(args.contents).toContain(
       '<chunk index="1">\nSupport is open 9 to 5.\n</chunk>',
     );
