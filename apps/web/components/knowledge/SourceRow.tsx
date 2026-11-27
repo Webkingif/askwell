@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { KnowledgeSource } from "@askwell/shared";
 import { Badge, Button, Spinner, cx } from "../ui";
 import { knowledgeApi } from "./api";
+import { FAILED_PDF_HINT } from "./files";
 import { STATUS_LABELS, TYPE_LABELS, formatDate, isPending } from "./status";
 
 /** One source: title (as text), type, status, date; delete after a confirm. */
@@ -41,8 +42,9 @@ export function SourceRow({ source }: { source: KnowledgeSource }) {
           </p>
           {source.status === "failed" && (
             <p className="mt-1 text-xs text-danger">
-              We couldn&apos;t read this one. Delete it and add it again, or try
-              another file.
+              {source.type === "pdf"
+                ? FAILED_PDF_HINT
+                : "We couldn't read this one. Delete it and add it again, or try another file."}
             </p>
           )}
         </div>

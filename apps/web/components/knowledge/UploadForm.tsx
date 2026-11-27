@@ -11,7 +11,13 @@ import {
 import { MAX_KNOWLEDGE_TITLE_LENGTH } from "@askwell/shared";
 import { Button, Input, Spinner } from "../ui";
 import { uploadFile, type UploadStage } from "./api";
-import { ACCEPT, MAX_FILE_MB, checkFile, formatSize } from "./files";
+import {
+  ACCEPT,
+  MAX_FILE_MB,
+  MAX_PDF_PAGES_HINT,
+  checkFile,
+  formatSize,
+} from "./files";
 
 const STAGE_LABELS: Record<UploadStage, string> = {
   preparing: "Preparing the upload…",
@@ -88,13 +94,16 @@ export function UploadForm({
           accept={ACCEPT}
           onChange={onPick}
           disabled={stage !== null}
-          aria-describedby={`${fileId}-hint`}
+          aria-describedby={`${fileId}-hint ${fileId}-pages`}
           className="focus-ring w-full min-w-0 rounded-md text-sm text-fg file:mr-3 file:h-10 file:cursor-pointer file:rounded-md file:border-0 file:bg-subtle file:px-4 file:text-sm file:font-medium file:text-fg"
         />
         <p id={`${fileId}-hint`} className="text-xs text-muted">
           {file
             ? `${file.name} · ${formatSize(file.size)}`
             : `PDF, Markdown or TXT, up to ${MAX_FILE_MB} MB.`}
+        </p>
+        <p id={`${fileId}-pages`} className="text-xs text-muted">
+          {MAX_PDF_PAGES_HINT}
         </p>
       </div>
       <Input

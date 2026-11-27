@@ -17,6 +17,9 @@ vi.mock("next/navigation", () => ({ useRouter: () => router }));
 const { KnowledgePanel, POLL_MS, POLL_MAX_MS } =
   await import("../../components/knowledge");
 
+const PAGES_NOTE =
+  "Keep PDFs under 100 pages. Split longer documents into several files.";
+
 const PROJECT = "aaaaaaaa-0000-4000-8000-000000000001";
 const SIGNED_URL = "https://storage.test/upload/sign/knowledge/k?token=t";
 
@@ -103,6 +106,30 @@ describe("list", () => {
     expect(within(items[3]!).getByText("Failed")).toBeTruthy();
     expect(within(items[3]!).getByText(/couldn't read this one/)).toBeTruthy();
     expect(screen.getByText("4 of 25 sources")).toBeTruthy();
+  });
+
+  it("a failed PDF tells the owner to split it; other failed files keep the general hint", () => {
+    renderPanel([
+      source({ title: "Big manual", type: "pdf", status: "failed" }),
+      source({ title: "Notes", type: "md", status: "failed" }),
+    ]);
+    const [pdf, md] = within(
+      screen.getByRole("list", { name: "Knowledge sources" }),
+    ).getAllByRole("listitem");
+    expect(
+      within(pdf!).getByText(
+        "We couldn't process this file. If it's long, split it into files under 100 pages, then delete this one and upload them.",
+      ),
+    ).toBeTruthy();
+    expect(within(pdf!).queryByText(/couldn't read this one/)).toBeNull();
+    expect(within(md!).getByText(/couldn't read this one/)).toBeTruthy();
+    expect(within(md!).queryByText(/100 pages/)).toBeNull();
+  });
+
+  it("a ready PDF shows no page hint", () => {
+    renderPanel([source({ type: "pdf", status: "ready" })]);
+    const list = screen.getByRole("list", { name: "Knowledge sources" });
+    expect(within(list).queryByText(/100 pages/)).toBeNull();
   });
 
   it("renders titles as text, never HTML", () => {
@@ -253,6 +280,19 @@ describe("upload", () => {
     new File(["%PDF-1.4 hello"], "Returns policy.pdf", {
       type: "application/pdf",
     });
+
+  it("tells owners to keep PDFs under 100 pages, before and after a file is picked", () => {
+    renderPanel([]);
+    const input = uploadForm().getByLabelText("File");
+    const note = uploadForm().getByText(PAGES_NOTE);
+    expect(note.className).toContain("text-muted");
+    expect(input.getAttribute("aria-describedby")?.split(" ")).toContain(
+      note.id,
+    );
+    pick(pdf());
+    expect(uploadForm().getByText(PAGES_NOTE)).toBeTruthy();
+    expect(uploadForm().getByText(/Returns policy\.pdf ·/)).toBeTruthy();
+  });
 
   it("runs upload-url → PUT to the signed URL → finalize, then refreshes", async () => {
     const user = userEvent.setup();
