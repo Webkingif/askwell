@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
+  type PostHogConfigResponse,
   API_ERROR_STATUS,
   MAX_KNOWLEDGE_FILE_BYTES,
   MAX_MESSAGE_LENGTH,
@@ -217,5 +218,24 @@ describe("ApiError", () => {
   });
   it("uses 402 for a Free config save", () => {
     expect(API_ERROR_STATUS.plan_required).toBe(402);
+  });
+});
+
+describe("GET /api/posthog-config", () => {
+  it("is a key and host, or both null", () => {
+    const configured: PostHogConfigResponse = {
+      key: "phc_x",
+      host: "https://us.i.posthog.com",
+    };
+    const off: PostHogConfigResponse = { key: null, host: null };
+    expect([configured.key, off.key]).toEqual(["phc_x", null]);
+    expectTypeOf<{
+      key: string;
+      host: null;
+    }>().not.toExtend<PostHogConfigResponse>();
+    expectTypeOf<{
+      key: null;
+      host: string;
+    }>().not.toExtend<PostHogConfigResponse>();
   });
 });

@@ -1,5 +1,6 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import type { ReactNode } from "react";
+import { AnalyticsIdentity } from "../analytics";
 import {
   DASHBOARD_PATH,
   SIGN_IN_PATH,
@@ -20,8 +21,13 @@ export const CLERK_PROVIDER_PROPS = {
  * (UserButton), /sign-in and /sign-up. It is not in the root layout, so the
  * landing page and /embed (inside customers' sites) load no Clerk at all
  * (project.md §6.5 Isolation, §9). Clerk supports rendering the provider
- * deeper in the tree for this.
+ * deeper in the tree for this. It also tells PostHog who is signed in.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  return <ClerkProvider {...CLERK_PROVIDER_PROPS}>{children}</ClerkProvider>;
+  return (
+    <ClerkProvider {...CLERK_PROVIDER_PROPS}>
+      <AnalyticsIdentity />
+      {children}
+    </ClerkProvider>
+  );
 }

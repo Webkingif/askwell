@@ -19,3 +19,11 @@ export interface UpdateWidgetConfigResponse {
   /** The full saved config. */
   config: WidgetConfig;
 }
+
+/**
+ * GET /api/posthog-config (project.md §8 System). Always 200 with
+ * `Cache-Control: no-store`. PostHog's public project key and host, read at
+ * request time; both null when PostHog isn't configured, so the browser skips it.
+ */
+export type PostHogConfigResponse =
+  { key: string; host: string } | { key: null; host: null };
