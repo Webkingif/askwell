@@ -4,6 +4,8 @@
 // page that never starts PostHog loads none of its code.
 import type { PostHog } from "posthog-js";
 import type { PostHogConfigResponse } from "@askwell/shared";
+// Types only: events.ts is server-only, and type imports are erased.
+import type { AnalyticsEvents, ClientAnalyticsEvent } from "./events";
 import { isTrackedPath } from "./paths";
 
 export const POSTHOG_CONFIG_PATH = "/api/posthog-config";
@@ -86,6 +88,21 @@ function applyUser(posthog: PostHog, id: string | null | undefined): void {
   // instead of merging the two.
   if (posthog._isIdentified()) posthog.reset();
   posthog.identify(id);
+}
+
+/**
+ * Sends a browser product event (lib/analytics/events.ts). A no-op until
+ * PostHog has started, so it does nothing without a key or on /embed. Never throws.
+ */
+export function trackClient<E extends ClientAnalyticsEvent>(
+  event: E,
+  properties: AnalyticsEvents[E],
+): void {
+  try {
+    instance?.capture(event, properties);
+  } catch (error) {
+    console.warn("PostHog capture failed", error);
+  }
 }
 
 /** Test only: forget the started instance and user. */

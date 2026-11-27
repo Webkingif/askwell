@@ -2,6 +2,7 @@ import "server-only";
 import { connection } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { planSchema, type Plan } from "@askwell/shared";
+import { track } from "./analytics/events";
 import { createOwnerClient } from "./supabase/owner";
 import { createServiceClient } from "./supabase/service";
 
@@ -33,6 +34,7 @@ export class NotSignedInError extends Error {
  * error is attached as `cause` for the server log.
  *
  * Called from the dashboard layout on every load, so it must stay idempotent.
+ * It sends `signed_up` only when it inserted the row.
  */
 export async function ensureAccount(): Promise<Account> {
   // A write belongs to a real request, never a prerender. With
@@ -43,12 +45,15 @@ export async function ensureAccount(): Promise<Account> {
   const { userId } = await auth();
   if (!userId) throw new NotSignedInError();
 
-  const { error: insertError } = await createServiceClient()
+  // RETURNING with ON CONFLICT DO NOTHING gives back only a row it inserted:
+  // one row the first time, none after.
+  const { data: inserted, error: insertError } = await createServiceClient()
     .from("accounts")
     .upsert(
       { clerk_user_id: userId },
       { onConflict: "clerk_user_id", ignoreDuplicates: true },
-    );
+    )
+    .select("clerk_user_id");
   if (insertError) {
     throw new Error(
       `ensureAccount: insert failed (${insertError.code || "no code"})`,
@@ -57,6 +62,9 @@ export async function ensureAccount(): Promise<Account> {
       },
     );
   }
+
+  // Only on the insert, never on every dashboard load (project.md §6.11).
+  if (inserted && inserted.length > 0) track("signed_up", userId, {});
 
   const { data, error: readError } = await createOwnerClient()
     .from("accounts")
