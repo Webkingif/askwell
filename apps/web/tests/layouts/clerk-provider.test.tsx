@@ -11,6 +11,7 @@ vi.mock("@clerk/nextjs", () => ({
   }: { children: ReactNode } & Record<string, string>) => (
     <div data-clerk-provider={JSON.stringify(props)}>{children}</div>
   ),
+  useAuth: () => ({ isLoaded: false, userId: null }),
 }));
 // The dashboard layout's server-only imports (not rendered here).
 vi.mock("server-only", () => ({}));
