@@ -4,8 +4,9 @@ vi.mock("server-only", () => ({}));
 vi.mock("@google/genai", () => import("./sdk-mock"));
 
 const sdk = await import("./sdk-mock");
+const embedModule = await import("../../lib/ai/embed");
 const { embedTexts, embedDocuments, embedQuery, EMBED_BATCH_SIZE } =
-  await import("../../lib/ai/embed");
+  embedModule;
 const { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } =
   await import("../../lib/ai/models");
 
@@ -144,6 +145,204 @@ describe("task types", () => {
     expect(calls()[0]).toMatchObject({
       contents: ["How do refunds work?"],
       config: { taskType: "RETRIEVAL_QUERY" },
+    });
+  });
+});
+
+/** A 429 the way the SDK throws it: ApiError, status 429, body as message. */
+function rateLimited(retryDelay?: string): Error {
+  const details: unknown[] = [
+    {
+      "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+      violations: [
+        {
+          quotaId: "EmbedContentRequestsPerMinutePerProjectPerModel-FreeTier",
+        },
+      ],
+    },
+  ];
+  if (retryDelay) {
+    details.push({
+      "@type": "type.googleapis.com/google.rpc.RetryInfo",
+      retryDelay,
+    });
+  }
+  const err = new Error(
+    JSON.stringify({
+      error: { code: 429, status: "RESOURCE_EXHAUSTED", details },
+    }),
+  );
+  return Object.assign(err, { name: "ApiError", status: 429 });
+}
+
+/** One vector per text, for any request. */
+const answer = ({ contents }: EmbedArgs) =>
+  Promise.resolve({ embeddings: contents.map(() => ({ values: vector(1) })) });
+
+describe("token-aware batching", () => {
+  const { batchTexts, estimateTokens, EMBED_BATCH_TOKENS } = embedModule;
+
+  it("estimates tokens as chars / 4, rounded up", () => {
+    expect(estimateTokens("")).toBe(0);
+    expect(estimateTokens("abcd")).toBe(1);
+    expect(estimateTokens("abcde")).toBe(2);
+  });
+
+  it("keeps every request at or under 20,000 estimated tokens", async () => {
+    echoVectors();
+    // 120 chunks of about 800 tokens (3,200 chars), like a 90-page PDF.
+    const texts = Array.from({ length: 120 }, (_, i) =>
+      `${i}`.padEnd(3_200, "x"),
+    );
+    const vectors = await embedTexts(texts);
+    expect(EMBED_BATCH_TOKENS).toBe(20_000);
+    for (const call of calls()) {
+      const tokens = call.contents.reduce((n, t) => n + estimateTokens(t), 0);
+      expect(tokens).toBeLessThanOrEqual(EMBED_BATCH_TOKENS);
+      expect(call.contents.length).toBeLessThanOrEqual(EMBED_BATCH_SIZE);
+    }
+    // 25 chunks of 800 = 20,000 tokens per request.
+    expect(calls().map((c) => c.contents.length)).toEqual([25, 25, 25, 25, 20]);
+    // Order is kept across batches.
+    expect(vectors.map((v) => Math.round(v[0] / v[1]))).toEqual(
+      texts.map((_, i) => i + 1),
+    );
+  });
+
+  it("still caps a batch at 100 short texts", () => {
+    const sizes = batchTexts(Array.from({ length: 230 }, () => "hi")).map(
+      (b) => b.length,
+    );
+    expect(sizes).toEqual([100, 100, 30]);
+  });
+
+  it("sends a text over the token limit alone", () => {
+    const big = "x".repeat(4 * 25_000);
+    expect(batchTexts(["a", big, "b"])).toEqual([["a"], [big], ["b"]]);
+  });
+});
+
+describe("rate limits (429)", () => {
+  const {
+    DOCUMENT_EMBED_DEADLINE_MS,
+    QUERY_EMBED_DEADLINE_MS,
+    RATE_LIMIT_FALLBACK_MS,
+    EmbedRateLimitError,
+    retryDelayMs,
+  } = embedModule;
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("reads Google's retryDelay", () => {
+    expect(retryDelayMs(rateLimited("37s"))).toBe(37_000);
+    expect(retryDelayMs(rateLimited("1.5s"))).toBe(1_500);
+    expect(retryDelayMs(rateLimited())).toBeNull();
+    expect(retryDelayMs("nope")).toBeNull();
+  });
+
+  it("waits retryDelay, then retries the same batch", async () => {
+    sdk.embedContent
+      .mockRejectedValueOnce(rateLimited("37s"))
+      .mockImplementation(answer);
+    const done = embedTexts(["a", "b"]);
+    await vi.advanceTimersByTimeAsync(36_999);
+    expect(sdk.embedContent).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await done).toHaveLength(2);
+    expect(calls().map((c) => c.contents)).toEqual([
+      ["a", "b"],
+      ["a", "b"],
+    ]);
+  });
+
+  it("waits 60 s when the 429 names no retryDelay", async () => {
+    sdk.embedContent
+      .mockRejectedValueOnce(rateLimited())
+      .mockImplementation(answer);
+    const done = embedTexts(["a"]);
+    await vi.advanceTimersByTimeAsync(RATE_LIMIT_FALLBACK_MS - 1);
+    expect(sdk.embedContent).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await done).toHaveLength(1);
+    expect(RATE_LIMIT_FALLBACK_MS).toBe(60_000);
+  });
+
+  it("keeps the batches already done and retries only the limited one", async () => {
+    const texts = Array.from({ length: 30 }, () => "x".repeat(3_200));
+    sdk.embedContent
+      .mockImplementationOnce(answer)
+      .mockRejectedValueOnce(rateLimited("20s"))
+      .mockImplementation(answer);
+    const done = embedTexts(texts);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(await done).toHaveLength(30);
+    expect(calls().map((c) => c.contents.length)).toEqual([25, 5, 5]);
+  });
+
+  it("gives up with a clear error once the deadline would pass", async () => {
+    expect(DOCUMENT_EMBED_DEADLINE_MS).toBe(270_000);
+    sdk.embedContent.mockRejectedValue(rateLimited("60s"));
+    const done = embedDocuments(["a"]);
+    const settled = expect(done).rejects.toThrow(EmbedRateLimitError);
+    // Retries at 60, 120, 180 and 240 s; the next would be at 300 s.
+    await vi.advanceTimersByTimeAsync(240_000);
+    await settled;
+    await expect(done).rejects.toThrow(
+      /rate limited \(429\); the next retry, in 60 s, would pass the 270 s deadline/,
+    );
+    expect(sdk.embedContent).toHaveBeenCalledTimes(5);
+  });
+
+  it("takes a custom deadline", async () => {
+    sdk.embedContent.mockRejectedValue(rateLimited("10s"));
+    const done = embedDocuments(["a"], { deadlineMs: 15_000 });
+    const settled = expect(done).rejects.toThrow(/15 s deadline/);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await settled;
+    expect(sdk.embedContent).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry other errors", async () => {
+    sdk.embedContent.mockRejectedValue(
+      Object.assign(new Error("bad request"), { status: 400 }),
+    );
+    await expect(embedTexts(["a"])).rejects.toThrow("bad request");
+    expect(sdk.embedContent).toHaveBeenCalledTimes(1);
+  });
+
+  describe("embedQuery (a visitor is waiting)", () => {
+    it("retries once when retryDelay fits in 5 s", async () => {
+      expect(QUERY_EMBED_DEADLINE_MS).toBe(5_000);
+      sdk.embedContent
+        .mockRejectedValueOnce(rateLimited("2s"))
+        .mockImplementation(answer);
+      const done = embedQuery("Q?");
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(await done).toHaveLength(1536);
+      expect(sdk.embedContent).toHaveBeenCalledTimes(2);
+    });
+
+    it("fails at once when retryDelay doesn't fit", async () => {
+      sdk.embedContent.mockRejectedValue(rateLimited("37s"));
+      await expect(embedQuery("Q?")).rejects.toThrow(EmbedRateLimitError);
+      expect(sdk.embedContent).toHaveBeenCalledTimes(1);
+    });
+
+    it("never waits the 60 s fallback", async () => {
+      sdk.embedContent.mockRejectedValue(rateLimited());
+      await expect(embedQuery("Q?")).rejects.toThrow(/5 s deadline/);
+      expect(sdk.embedContent).toHaveBeenCalledTimes(1);
+    });
+
+    it("gives up within 5 s across retries", async () => {
+      sdk.embedContent.mockRejectedValue(rateLimited("2s"));
+      const done = embedQuery("Q?");
+      const settled = expect(done).rejects.toThrow(EmbedRateLimitError);
+      await vi.advanceTimersByTimeAsync(4_000);
+      await settled;
+      // 0 s, 2 s, 4 s; the next (6 s) would pass 5 s.
+      expect(sdk.embedContent).toHaveBeenCalledTimes(3);
     });
   });
 });
