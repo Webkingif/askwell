@@ -1,9 +1,8 @@
 // GET /api/widget/config?key=pk_... (project.md §6.5, §8 Public).
 // Called by the loader from any website: CORS allows every origin, with no
 // credentials (the route reads no cookies and grants nothing but the config).
-//
-// TODO(Phase 3): rate limit with Arcjet (project.md §9 Cost abuse) once
-// ARCJET_KEY is available.
+// Rate limited per route + public key + IP with Arcjet (project.md §9 Cost
+// abuse); fails open if Arcjet is down.
 import { NextResponse, type NextRequest } from "next/server";
 import {
   API_ERROR_STATUS,
@@ -11,6 +10,7 @@ import {
   widgetConfigQuerySchema,
   type WidgetConfigResponse,
 } from "@askwell/shared";
+import { protectWidgetRequest } from "../../../../lib/arcjet/protect";
 import { getWidgetConfigByKey } from "../../../../lib/widget-config";
 
 const CORS_HEADERS = {
@@ -33,6 +33,21 @@ export async function GET(request: NextRequest) {
     key: request.nextUrl.searchParams.get("key") ?? "",
   });
   if (!query.success) return notFound();
+
+  // Before the database lookup, so a flood never reaches it.
+  const protection = await protectWidgetRequest(request, {
+    route: "config",
+    publicKey: query.data.key,
+  });
+  if (!protection.allowed) {
+    return NextResponse.json(
+      apiError("rate_limited", "Too many requests. Try again in a minute."),
+      {
+        status: API_ERROR_STATUS.rate_limited,
+        headers: { ...CORS_HEADERS, "Cache-Control": "no-store" },
+      },
+    );
+  }
 
   try {
     const config = await getWidgetConfigByKey(query.data.key);
