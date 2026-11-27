@@ -128,6 +128,7 @@ The whole product in one flow. When this works end to end, the product is done.
 | ---------- | --------------------------------------------------------------------------------------- |
 | Input      | Paste text with a title, or upload a file                                               |
 | File types | PDF, Markdown, TXT. Max 10 MB (`MAX_KNOWLEDGE_FILE_BYTES`); the bucket enforces the same size and types. |
+| Size guidance | PDFs under 100 pages (the free AI tier's limit per file); the upload form says so. A failed PDF tells the owner to split it. Advice only: the server's limits are unchanged. |
 | Upload     | 1. `upload-url` reserves the source as `uploading` (counts toward the limit) and returns a one-time signed URL. 2. The browser uploads straight to Storage. 3. `finalize` claims the source once (`uploading` → `processing`), checks the real size and PDF bytes, then processes it. A refused file is deleted. A reservation not finalized within 2 hours is reclaimed. |
 | Processing | Extract text (PDF: `unpdf`) → split into chunks → Gemini embeddings (`gemini-embedding-001`, 1536 dims) → store in pgvector |
 | Actions    | List sources with status (`uploading` shows as processing), delete a source (deletes its file and chunks) |

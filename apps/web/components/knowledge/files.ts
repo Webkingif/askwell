@@ -14,6 +14,19 @@ export const ACCEPT =
 
 export const MAX_FILE_MB = MAX_KNOWLEDGE_FILE_BYTES / (1024 * 1024);
 
+/**
+ * Advice only, never checked here (project.md §6.4 Size guidance): about how
+ * many PDF pages the free Gemini tier gets through per file within the
+ * 5-minute processing window.
+ */
+export const MAX_PDF_PAGES = 100;
+
+/** Under the upload form's file picker. */
+export const MAX_PDF_PAGES_HINT = `Keep PDFs under ${MAX_PDF_PAGES} pages. Split longer documents into several files.`;
+
+/** On a failed PDF source. */
+export const FAILED_PDF_HINT = `We couldn't process this file. If it's long, split it into files under ${MAX_PDF_PAGES} pages, then delete this one and upload them.`;
+
 export type FileCheck =
   | { ok: true; contentType: KnowledgeMimeType }
   | {

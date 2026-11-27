@@ -6,7 +6,10 @@ export { UploadForm } from "./UploadForm";
 export { knowledgeApi, uploadFile, type UploadStage } from "./api";
 export {
   ACCEPT,
+  FAILED_PDF_HINT,
   MAX_FILE_MB,
+  MAX_PDF_PAGES,
+  MAX_PDF_PAGES_HINT,
   checkFile,
   formatSize,
   type FileCheck,

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { MAX_KNOWLEDGE_FILE_BYTES } from "@askwell/shared";
-import { checkFile, formatSize } from "../../components/knowledge/files";
+import {
+  FAILED_PDF_HINT,
+  MAX_PDF_PAGES,
+  MAX_PDF_PAGES_HINT,
+  checkFile,
+  formatSize,
+} from "../../components/knowledge/files";
 
 const file = (name: string, size: number, type = "") => ({ name, size, type });
 
@@ -65,5 +71,15 @@ describe("formatSize", () => {
     expect(formatSize(500)).toBe("500 B");
     expect(formatSize(2048)).toBe("2 KB");
     expect(formatSize(5.5 * 1024 * 1024)).toBe("5.5 MB");
+  });
+});
+
+describe("PDF page hints", () => {
+  it("both name the same page limit", () => {
+    expect(MAX_PDF_PAGES).toBe(100);
+    expect(MAX_PDF_PAGES_HINT).toBe(
+      "Keep PDFs under 100 pages. Split longer documents into several files.",
+    );
+    expect(FAILED_PDF_HINT).toContain(`under ${MAX_PDF_PAGES} pages`);
   });
 });
