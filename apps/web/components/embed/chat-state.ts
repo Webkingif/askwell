@@ -8,27 +8,41 @@ export interface ChatMessage {
   text: string;
 }
 
+/** A bot-style notice for the last send, when it failed. */
+export interface ChatNotice {
+  /** Friendly text, shown as text. */
+  text: string;
+  /** The message to send again, when retrying can help. */
+  retryText: string | null;
+}
+
 export interface ChatState {
   messages: ChatMessage[];
   /** Waiting for the bot: shows the typing state and blocks sending. */
   typing: boolean;
   conversationId?: string;
-  /** A friendly error for the last send, if it failed. */
-  error: string | null;
+  /** Why the last send failed, if it did. */
+  notice: ChatNotice | null;
 }
 
 export type ChatAction =
   | { type: "sent"; id: string; text: string }
   | { type: "replied"; id: string; text: string; conversationId: string }
-  | { type: "failed"; error: string };
+  | {
+      type: "failed";
+      notice: string;
+      retry: boolean;
+      /** The server doesn't know the conversation: start a new one. */
+      resetConversation?: boolean;
+    }
+  /** Sends the failed message again, without adding a new bubble. */
+  | { type: "retried" };
 
 export const initialChatState: ChatState = {
   messages: [],
   typing: false,
-  error: null,
+  notice: null,
 };
-
-export const SEND_ERROR = "Your message didn't go through. Try again.";
 
 /** The text to send, or null if it's empty or too long. */
 export function cleanMessage(raw: string): string | null {
@@ -47,7 +61,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           { id: action.id, role: "visitor", text: action.text },
         ],
         typing: true,
-        error: null,
+        notice: null,
       };
     case "replied":
       return {
@@ -59,7 +73,22 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         typing: false,
         conversationId: action.conversationId,
       };
-    case "failed":
-      return { ...state, typing: false, error: action.error };
+    case "failed": {
+      const last = state.messages.at(-1);
+      return {
+        ...state,
+        typing: false,
+        conversationId: action.resetConversation
+          ? undefined
+          : state.conversationId,
+        notice: {
+          text: action.notice,
+          retryText:
+            action.retry && last?.role === "visitor" ? last.text : null,
+        },
+      };
+    }
+    case "retried":
+      return { ...state, typing: true, notice: null };
   }
 }

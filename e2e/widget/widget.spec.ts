@@ -1,6 +1,7 @@
 // Phase 2 "Done when", end to end: a plain page on another origin shows the
-// widget button, the panel opens and shows a mock reply (plan.md Phase 2,
+// widget button, the panel opens and shows a reply (plan.md Phase 2,
 // project.md §6.5, §6.9, §9). Runs against a Vercel preview; see README.md.
+// The chat route is stubbed, so the check needs no AI or knowledge.
 import {
   expect,
   test,
@@ -21,7 +22,30 @@ const APP_ORIGIN = (() => {
 })();
 const SECRET = process.env.VERCEL_AUTOMATION_BYPASS_SECRET ?? "";
 const HAS_KEY = Boolean(process.env.WIDGET_KEY || process.env.WIDGET_SNIPPET);
-const MOCK_REPLY = "Thanks! Real answers arrive soon.";
+const STUB_REPLY = "Stubbed answer <i>as text</i>";
+const STUB_CONVERSATION = "3f0c8d7e-1b2a-4c5d-8e9f-0a1b2c3d4e5f";
+
+/**
+ * Answers the panel's POST /api/widget/chat (on the app's origin) with a
+ * contract-shaped reply after a short delay, so the typing state shows.
+ * Returns the request bodies it saw.
+ */
+async function stubChat(page: Page) {
+  const bodies: Record<string, unknown>[] = [];
+  await page.route(`${APP_ORIGIN}/api/widget/chat`, async (route) => {
+    bodies.push(route.request().postDataJSON() as Record<string, unknown>);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        conversationId: STUB_CONVERSATION,
+        reply: STUB_REPLY,
+      }),
+    });
+  });
+  return bodies;
+}
 
 test.beforeAll(() => {
   if (!PREVIEW_URL.startsWith("https://")) {
@@ -157,6 +181,7 @@ async function hostStyles(page: Page) {
 test("the widget works on a plain page on another origin", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (e) => pageErrors.push(e.message));
+  const chatBodies = await stubChat(page);
 
   await page.goto("/");
   expect(new URL(page.url()).origin).not.toBe(PREVIEW_URL);
@@ -219,13 +244,23 @@ test("the widget works on a plain page on another origin", async ({ page }) => {
   const expected = Math.min(600, page.viewportSize()!.height - 112);
   await expect.poll(panelHeight).toBe(expected);
 
-  // Typing a message shows typing, then the mock reply.
+  // Typing a message shows typing, then the (stubbed) chat route's reply,
+  // rendered as text.
   const input = frame.getByRole("textbox", { name: "Message" });
   await input.fill("Hello from another origin <b>hi</b>");
   await input.press("Enter");
   await expect(frame.getByText("Typing…")).toBeAttached();
-  await expect(frame.getByText(MOCK_REPLY)).toBeVisible();
+  await expect(frame.getByText(STUB_REPLY)).toBeVisible();
+  await expect(frame.locator("i")).toHaveCount(0);
   await expect(frame.getByText("Typing…")).toHaveCount(0);
+  // The panel sent the contract body to its own origin's chat route.
+  expect(chatBodies).toEqual([
+    {
+      key: expect.stringMatching(/^pk_/),
+      visitorId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      message: "Hello from another origin <b>hi</b>",
+    },
+  ]);
   await expect(
     frame.getByText("Hello from another origin <b>hi</b>"),
   ).toBeVisible();
@@ -240,7 +275,7 @@ test("the widget works on a plain page on another origin", async ({ page }) => {
   // Reopening keeps the conversation.
   await shadow.click(page, ".btn");
   await expect.poll(() => shadow.isOpen()).toBe(true);
-  await expect(embedFrame(page)!.getByText(MOCK_REPLY)).toBeVisible();
+  await expect(embedFrame(page)!.getByText(STUB_REPLY)).toBeVisible();
 
   expect(pageErrors).toEqual([]);
 });
