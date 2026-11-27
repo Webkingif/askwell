@@ -319,21 +319,55 @@ async function openPanel(page: Page): Promise<Frame> {
     .find((f) => f.url().startsWith(`${PREVIEW_URL}/embed?`))!;
 }
 
-/** Sends a message in the panel; resolves with the chat route's response. */
+/** Chromium errors for a connection that never came up (nothing sent). */
+const BROWSER_NOT_SENT =
+  /ERR_(SSL_PROTOCOL_ERROR|TUNNEL_CONNECTION_FAILED|PROXY_CONNECTION_FAILED|NAME_NOT_RESOLVED|CONNECTION_REFUSED)/;
+
+/**
+ * Sends a message in the panel; resolves with the chat route's response.
+ * If the panel's request fails before its connection is up (a flaky
+ * network), clicks the panel's "Try again", as a visitor would.
+ */
 async function ask(page: Page, frame: Frame, text: string) {
-  const response = page.waitForResponse(
-    (r) =>
-      r.url() === `${PREVIEW_URL}/api/widget/chat` &&
-      r.request().method() === "POST",
-    { timeout: 60_000 },
-  );
+  const isChat = (url: string, method: string) =>
+    url === `${PREVIEW_URL}/api/widget/chat` && method === "POST";
+  const next = () =>
+    Promise.race([
+      page
+        .waitForResponse((r) => isChat(r.url(), r.request().method()), {
+          timeout: 60_000,
+        })
+        .then((response) => ({ response, failure: null }))
+        .catch(() => ({ response: null, failure: "no response in 60 s" })),
+      page
+        .waitForEvent("requestfailed", {
+          predicate: (r) => isChat(r.url(), r.method()),
+          timeout: 60_000,
+        })
+        .then((r) => ({ response: null, failure: r.failure()?.errorText }))
+        .catch(() => ({ response: null, failure: "no response in 60 s" })),
+    ]);
+
+  let result = next();
   const input = frame.getByRole("textbox", { name: "Message" });
   await input.fill(text);
   await input.press("Enter");
-  const res = await response;
-  // Wait for the panel to finish (the typing bubble goes).
-  await expect(frame.getByText("Typing…")).toHaveCount(0, { timeout: 30_000 });
-  return res;
+  for (let attempt = 1; ; attempt++) {
+    const { response, failure } = await result;
+    if (response) {
+      // Wait for the panel to finish (the typing bubble goes).
+      await expect(frame.getByText("Typing…")).toHaveCount(0, {
+        timeout: 30_000,
+      });
+      return response;
+    }
+    console.log(`panel request failed: ${failure}`);
+    if (attempt >= 4 || !BROWSER_NOT_SENT.test(failure ?? "")) {
+      throw new Error(`The panel's chat request failed: ${failure}`);
+    }
+    result = next();
+    await frame.getByRole("button", { name: "Try again" }).click();
+  }
 }
 
 /** The text of the panel's last bubble, without its screen-reader label. */
