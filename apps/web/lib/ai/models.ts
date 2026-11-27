@@ -21,3 +21,16 @@ export const EMBEDDING_DIMENSIONS = 1536;
  * tokens a minute (AI Studio, 2026-11-27; docs/project.md §3).
  */
 export const CHAT_MODEL = "gemini-3.5-flash-lite";
+
+/**
+ * CHAT_MODEL's list prices in USD per token, for the PostHog AI trace's cost
+ * (project.md §6.11). Paid tier, Standard: $0.30 per 1M input tokens (text,
+ * image, video, audio) and $2.50 per 1M output tokens, thinking included.
+ * Source: https://ai.google.dev/gemini-api/docs/pricing ("Gemini 3.5
+ * Flash-Lite", read 2026-11-27). We run on the free tier, so this is what
+ * the traffic would cost, not what it's billed. Update both together.
+ */
+export const CHAT_MODEL_PRICE_USD_PER_TOKEN = {
+  input: 0.3 / 1_000_000,
+  output: 2.5 / 1_000_000,
+} as const;

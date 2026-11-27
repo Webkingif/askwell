@@ -9,6 +9,7 @@ const VISITOR = "8a6e0804-2bd0-4672-b79d-d97027f9071b";
 const CONVERSATION = "3f0c8d7e-1b2a-4c5d-8e9f-0a1b2c3d4e5f";
 const NEW_CONVERSATION = "4a1d9e8f-2c3b-4d5e-9f0a-1b2c3d4e5f60";
 const VECTOR = [0.6, 0.8];
+const OWNER = "user_owner_a";
 
 /** Everything the route does, in order, so tests can check the step order. */
 const s = vi.hoisted(() => ({
@@ -18,9 +19,14 @@ const s = vi.hoisted(() => ({
   protectArgs: [] as Record<string, unknown>[],
   projects: new Map<
     string,
-    { id: string; accounts: { plan: string } | null }
+    { id: string; owner_id: string; accounts: { plan: string } | null }
   >(),
-  conversations: [] as { id: string; project_id: string; visitor_id: string }[],
+  conversations: [] as {
+    id: string;
+    project_id: string;
+    visitor_id: string;
+    created_at: string;
+  }[],
   allowed: true,
   chunks: [] as {
     id: string;
@@ -31,6 +37,27 @@ const s = vi.hoisted(() => ({
   rpcArgs: {} as Record<string, Record<string, unknown>>,
   answer: null as null | Error,
   embedError: null as null | Error,
+  /** Callbacks given to after(), run by the test (flushAfter). */
+  after: [] as (() => unknown)[],
+  /** What reached PostHog (lib/analytics/server's captureServerEvent). */
+  captured: [] as {
+    event: string;
+    distinctId: string;
+    properties?: Record<string, unknown>;
+  }[],
+}));
+
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  after: (fn: () => unknown) => {
+    s.after.push(fn);
+  },
+}));
+
+vi.mock("../../lib/analytics/server", () => ({
+  captureServerEvent: (e: (typeof s.captured)[number]) => {
+    s.captured.push(e);
+  },
 }));
 
 vi.mock("../../lib/arcjet/protect", () => ({
@@ -73,11 +100,17 @@ vi.mock("../../lib/supabase/service", () => ({
     from: (table: string) => ({
       select: () => {
         const filters: [string, string][] = [];
+        let ordered = false;
         const q = {
           eq: (col: string, value: string) => {
             filters.push([col, value]);
             return q;
           },
+          order: () => {
+            ordered = true;
+            return q;
+          },
+          limit: () => q,
           maybeSingle: async () => {
             s.events.push(`read:${table}`);
             const has = (c: string, v: string) =>
@@ -85,6 +118,13 @@ vi.mock("../../lib/supabase/service", () => ({
             if (table === "projects") {
               const key = filters.find(([c]) => c === "public_key")?.[1] ?? "";
               return { data: s.projects.get(key) ?? null, error: null };
+            }
+            if (ordered) {
+              // The project's earliest conversation.
+              const first = s.conversations
+                .filter((c) => has("project_id", c.project_id))
+                .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+              return { data: first ? { id: first.id } : null, error: null };
             }
             const row = s.conversations.find(
               (c) =>
@@ -109,10 +149,22 @@ vi.mock("../../lib/supabase/service", () => ({
       }
       if (name === "match_chunks") return { data: s.chunks, error: null };
       if (name === "save_chat_turn") {
-        return {
-          data: args.p_conversation_id ?? NEW_CONVERSATION,
-          error: null,
-        };
+        if (args.p_conversation_id) {
+          return { data: args.p_conversation_id, error: null };
+        }
+        // A new conversation: NEW_CONVERSATION first, then fresh IDs.
+        const id = s.conversations.some((c) => c.id === NEW_CONVERSATION)
+          ? crypto.randomUUID()
+          : NEW_CONVERSATION;
+        s.conversations.push({
+          id,
+          project_id: String(args.p_project_id),
+          visitor_id: String(args.p_visitor_id),
+          created_at: new Date(
+            Date.now() + s.conversations.length,
+          ).toISOString(),
+        });
+        return { data: id, error: null };
       }
       throw new Error(`unexpected rpc ${name}`);
     },
@@ -142,6 +194,11 @@ const valid = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
+/** Runs what the route left for after the response. */
+async function flushAfter() {
+  while (s.after.length) await s.after.shift()!();
+}
+
 const aiCalls = () => s.events.filter((e) => /^(embed|answer):/.test(e));
 const counted = () => s.events.includes("rpc:consume_message");
 
@@ -149,10 +206,19 @@ beforeEach(() => {
   s.events = [];
   s.protect = { allowed: true };
   s.protectArgs = [];
-  s.projects = new Map([[KEY, { id: PROJECT_ID, accounts: { plan: "free" } }]]);
+  s.projects = new Map([
+    [KEY, { id: PROJECT_ID, owner_id: OWNER, accounts: { plan: "free" } }],
+  ]);
   s.conversations = [
-    { id: CONVERSATION, project_id: PROJECT_ID, visitor_id: VISITOR },
+    {
+      id: CONVERSATION,
+      project_id: PROJECT_ID,
+      visitor_id: VISITOR,
+      created_at: "2026-11-01T00:00:00.000Z",
+    },
   ];
+  s.after = [];
+  s.captured = [];
   s.allowed = true;
   s.chunks = [
     {
@@ -235,7 +301,11 @@ describe("POST /api/widget/chat: happy path", () => {
   it.each(["free", "pro"] as const)(
     "counts against the %s plan's monthly limit, read on the server",
     async (plan) => {
-      s.projects.set(KEY, { id: PROJECT_ID, accounts: { plan } });
+      s.projects.set(KEY, {
+        id: PROJECT_ID,
+        owner_id: OWNER,
+        accounts: { plan },
+      });
       await post(valid());
       expect(s.rpcArgs.consume_message).toEqual({
         p_project_id: PROJECT_ID,
@@ -245,7 +315,7 @@ describe("POST /api/widget/chat: happy path", () => {
   );
 
   it("an unknown or missing plan gets Free's limit", async () => {
-    s.projects.set(KEY, { id: PROJECT_ID, accounts: null });
+    s.projects.set(KEY, { id: PROJECT_ID, owner_id: OWNER, accounts: null });
     await post(valid({ plan: "pro" }));
     expect(s.rpcArgs.consume_message.p_limit).toBe(
       PLAN_LIMITS.free.messagesPerMonth,
@@ -297,6 +367,7 @@ describe("refusals happen before counting and before the AI", () => {
       id: "5b2e0f9a-3d4c-4e5f-a01b-2c3d4e5f6071",
       project_id: OTHER_PROJECT_ID,
       visitor_id: VISITOR,
+      created_at: "2026-11-02T00:00:00.000Z",
     });
     await expectError(
       await post(
@@ -368,5 +439,149 @@ describe("CORS", () => {
       "Content-Type",
     );
     expect(res.headers.get("access-control-allow-credentials")).toBeNull();
+  });
+});
+
+describe("analytics (project.md §6.11), after the response", () => {
+  const TEXT = /Do you ship|ship abroad|We ship to the EU|From 1 chunks/;
+  const named = (event: string) => s.captured.filter((e) => e.event === event);
+
+  it("sends nothing before the response: every send waits for after()", async () => {
+    s.conversations = [];
+    expect((await post(valid())).status).toBe(200);
+    expect(s.captured).toEqual([]);
+    expect(s.after.length).toBeGreaterThan(0);
+  });
+
+  it("traces a bot reply as $ai_generation under the owner, grouped by conversation, with a cost", async () => {
+    await post(valid({ conversationId: CONVERSATION }));
+    await flushAfter();
+    const [trace, ...more] = named("$ai_generation");
+    expect(more).toEqual([]);
+    expect(trace).toEqual({
+      event: "$ai_generation",
+      distinctId: OWNER,
+      properties: {
+        $ai_model: "gemini-test",
+        $ai_provider: "google",
+        $ai_input_tokens: 10,
+        $ai_output_tokens: 5,
+        // List price (lib/ai/models.ts): $0.30 and $2.50 per 1M tokens.
+        $ai_input_cost_usd: 0.000003,
+        $ai_output_cost_usd: 0.0000125,
+        $ai_total_cost_usd: 0.0000155,
+        $ai_latency: 0.012,
+        $ai_trace_id: CONVERSATION,
+        $ai_is_error: false,
+        projectId: PROJECT_ID,
+        chunks: 1,
+      },
+    });
+    expect(trace!.properties!.$ai_total_cost_usd).toBeGreaterThan(0);
+  });
+
+  it("privacy mode: no visitor, chunk or bot text and no visitor ID in any event", async () => {
+    s.conversations = [];
+    await post(valid());
+    await flushAfter();
+    s.protect = { allowed: false, reason: "injection" };
+    await post(valid());
+    await flushAfter();
+    expect(s.captured.length).toBeGreaterThanOrEqual(3);
+    const sent = JSON.stringify(s.captured);
+    expect(sent).not.toMatch(TEXT);
+    expect(sent).not.toContain(VISITOR);
+    expect(sent).not.toContain(KEY);
+    expect(s.captured.every((e) => e.distinctId === OWNER)).toBe(true);
+  });
+
+  it("a model error sends $ai_generation with $ai_is_error and no text", async () => {
+    const err = Object.assign(new Error("model said: Do you ship abroad?"), {
+      name: "ApiError",
+      status: 503,
+    });
+    s.answer = err;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect((await post(valid({ conversationId: CONVERSATION }))).status).toBe(
+      500,
+    );
+    await flushAfter();
+    const [trace] = named("$ai_generation");
+    expect(trace!.distinctId).toBe(OWNER);
+    expect(trace!.properties).toMatchObject({
+      $ai_is_error: true,
+      $ai_error: "ApiError 503",
+      $ai_trace_id: CONVERSATION,
+      $ai_input_tokens: 0,
+      $ai_output_tokens: 0,
+      projectId: PROJECT_ID,
+    });
+    expect(JSON.stringify(s.captured)).not.toMatch(TEXT);
+  });
+
+  it("no chunks: the I-don't-know reply made no model call, so no trace", async () => {
+    s.chunks = [];
+    await post(valid({ conversationId: CONVERSATION }));
+    await flushAfter();
+    expect(named("$ai_generation")).toEqual([]);
+  });
+
+  it.each(["rate_limit", "injection"] as const)(
+    "message_blocked with reason %s, under the owner, no text",
+    async (reason) => {
+      s.protect = { allowed: false, reason };
+      await post(valid());
+      await flushAfter();
+      expect(s.captured).toEqual([
+        {
+          event: "message_blocked",
+          distinctId: OWNER,
+          properties: { projectId: PROJECT_ID, reason },
+        },
+      ]);
+    },
+  );
+
+  it("message_blocked: an unknown key sends nothing", async () => {
+    s.protect = { allowed: false, reason: "rate_limit" };
+    await post(valid({ key: "pk_00000000000000000000000000000000" }));
+    await flushAfter();
+    expect(s.captured).toEqual([]);
+  });
+
+  it("first_chat once, on the project's very first conversation only", async () => {
+    s.conversations = [];
+    await post(valid());
+    await flushAfter();
+    expect(named("first_chat")).toEqual([
+      {
+        event: "first_chat",
+        distinctId: OWNER,
+        properties: { projectId: PROJECT_ID },
+      },
+    ]);
+    // A later message in that conversation, and a second conversation: no more.
+    await post(valid({ conversationId: NEW_CONVERSATION }));
+    await post(valid());
+    expect(s.conversations).toHaveLength(2);
+    await flushAfter();
+    expect(named("first_chat")).toHaveLength(1);
+  });
+
+  it("no first_chat when the project already had a conversation", async () => {
+    await post(valid());
+    await flushAfter();
+    expect(named("first_chat")).toEqual([]);
+  });
+
+  it("a failing analytics lookup never changes the reply", async () => {
+    s.conversations = [];
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const res = await post(valid());
+    expect(res.status).toBe(200);
+    s.captured.push = () => {
+      throw new Error("posthog down");
+    };
+    await expect(flushAfter()).resolves.toBeUndefined();
   });
 });
