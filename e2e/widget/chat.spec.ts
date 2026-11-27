@@ -13,6 +13,7 @@ import {
   expect,
   test,
   type APIRequestContext,
+  type APIResponse,
   type CDPSession,
   type Frame,
   type Page,
@@ -56,7 +57,8 @@ async function clerk<T>(
   const res = await request.fetch(`${CLERK_API}${path}`, {
     method,
     headers: { Authorization: `Bearer ${CLERK_SECRET_KEY}` },
-    data,
+    // Clerk answers a POST with no JSON body with 415.
+    data: method === "POST" ? (data ?? {}) : data,
   });
   if (!res.ok()) {
     throw new Error(`Clerk ${method} ${path} → ${res.status()}`);
@@ -421,18 +423,27 @@ test("answers from the PDF, says I don't know, then rate limits", async ({
   const { conversationId } = (await first.json()) as { conversationId: string };
   const visitorId = (first.request().postDataJSON() as { visitorId: string })
     .visitorId;
+  // A request that fails before it reaches the server (a network error) is
+  // retried: it never reached Arcjet, so it didn't count.
+  const send = async (i: number): Promise<APIResponse> => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await request.post(`${PREVIEW_URL}/api/widget/chat`, {
+          headers: SECRET ? { "x-vercel-protection-bypass": SECRET } : {},
+          data: {
+            key: project.publicKey,
+            visitorId,
+            conversationId,
+            message: `Do you sell bike bell number ${i + 3}?`,
+          },
+        });
+      } catch (err) {
+        if (attempt === 3) throw err;
+      }
+    }
+  };
   const burst = await Promise.all(
-    Array.from({ length: CHAT_PER_MINUTE - 2 }, (_, i) =>
-      request.post(`${PREVIEW_URL}/api/widget/chat`, {
-        headers: SECRET ? { "x-vercel-protection-bypass": SECRET } : {},
-        data: {
-          key: project.publicKey,
-          visitorId,
-          conversationId,
-          message: `Do you sell bike bell number ${i + 3}?`,
-        },
-      }),
-    ),
+    Array.from({ length: CHAT_PER_MINUTE - 2 }, (_, i) => send(i)),
   );
   const statuses = burst.map((r) => r.status());
   console.log(`burst statuses (messages 3–20): ${statuses.join(" ")}`);
