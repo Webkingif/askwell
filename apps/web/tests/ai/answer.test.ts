@@ -40,6 +40,8 @@ describe("answerFromChunks", () => {
     expect(args.config.systemInstruction).toBe(SYSTEM_PROMPT);
     // Gemini 4 ignores sampling parameters; Google says to remove them.
     expect(args.config).not.toHaveProperty("temperature");
+    // Hydrogen defaults to HIGH; a support answer needs LOW.
+    expect(args.config.thinkingConfig).toEqual({ thinkingLevel: "LOW" });
     expect(args.contents).toContain(
       '<chunk index="1">\nSupport is open 9 to 5.\n</chunk>',
     );

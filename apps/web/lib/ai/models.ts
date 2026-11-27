@@ -13,7 +13,9 @@ export const EMBEDDING_MODEL = "gemini-embedding-001";
 export const EMBEDDING_DIMENSIONS = 1536;
 
 /**
- * Chat model: Google's default fast model, successor to Gemini 3.8 Flash
- * (product owner's choice, 2026-11-27). Gemini 4 ignores `temperature`.
+ * Chat model: the latest stable Gemini Flash-line model. Google calls
+ * gemini-4-hydrogen "the recommended upgrade from Gemini 3.8 Flash", on the
+ * free tier (aistudio.google.com/docs/whats-new-gemini-4-hydrogen). The
+ * product owner chose it on 2026-11-27. Gemini 4 ignores `temperature`.
  */
 export const CHAT_MODEL = "gemini-4-hydrogen";

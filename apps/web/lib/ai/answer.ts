@@ -1,4 +1,5 @@
 import "server-only";
+import { ThinkingLevel } from "@google/genai";
 import { createGeminiClient } from "./client";
 import { CHAT_MODEL } from "./models";
 import {
@@ -7,6 +8,12 @@ import {
   SYSTEM_PROMPT,
   type PromptChunk,
 } from "./prompt";
+
+/**
+ * Hydrogen defaults to HIGH thinking. A short answer from 5 chunks needs
+ * little reasoning, and thinking tokens are billed as output.
+ */
+export const CHAT_THINKING_LEVEL = ThinkingLevel.LOW;
 
 export type Answer = {
   reply: string;
@@ -40,7 +47,10 @@ export async function answerFromChunks(
     contents: buildUserPrompt(question, chunks),
     // No temperature: Gemini 4 ignores sampling parameters and Google says
     // to remove them. The system prompt keeps answers to the chunks.
-    config: { systemInstruction: SYSTEM_PROMPT },
+    config: {
+      systemInstruction: SYSTEM_PROMPT,
+      thinkingConfig: { thinkingLevel: CHAT_THINKING_LEVEL },
+    },
   });
   const usage = response.usageMetadata;
   return {
