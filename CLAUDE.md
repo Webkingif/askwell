@@ -78,6 +78,7 @@ Your task (from `get_my_task`) lists the `project.md` sections it needs. Read th
 | New dependency | Allowed. Name it and the reason in the PR body. |
 | UI | Follow `project.md` §13 Design. Reuse components in `apps/web/components`. |
 | App name | `APP_NAME` from `packages/shared`. Never hardcode it. |
+| AI | Google Gemini only, through `@google/genai` in `apps/web/lib/ai` (models in `models.ts`, key `GEMINI_API_KEY`). Never use OpenAI models, the `openai` package, or `OPENAI_API_KEY`. |
 
 ## Commands
 
