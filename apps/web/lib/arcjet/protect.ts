@@ -93,9 +93,7 @@ export async function protectWidgetRequest(
       return { allowed: true };
     }
     if (!decision.isDenied()) return { allowed: true };
-    // TODO(Phase 4): when route === "chat", send the `message_blocked`
-    // PostHog event (project.md §6.6 step 1) with the reason below, once
-    // NEXT_PUBLIC_POSTHOG_KEY is available.
+    // The chat route sends `message_blocked` with this reason (lib/chat/handle-chat.ts).
     if (decision.reason.isPromptInjection()) {
       return { allowed: false, reason: "injection" };
     }

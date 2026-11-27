@@ -9,8 +9,12 @@ import {
   type ApiErrorCode,
   type WidgetChatResponse,
 } from "@askwell/shared";
+import { after } from "next/server";
 import { answerFromChunks, type Answer } from "../ai/answer";
 import { embedQuery } from "../ai/embed";
+import { CHAT_MODEL } from "../ai/models";
+import { trackAiGeneration } from "../analytics/ai";
+import { track } from "../analytics/events";
 import { protectWidgetRequest } from "../arcjet/protect";
 import { createServiceClient } from "../supabase/service";
 
@@ -22,6 +26,11 @@ import { createServiceClient } from "../supabase/service";
 // service client, scoped by hand to the one project the public key resolves
 // to (§7, §9 Tenant leak). The plan is read from the owner's account, never
 // from the request (§9 Plan bypass).
+//
+// Analytics (§6.11): every event goes to the project owner's Clerk ID with a
+// projectId property, so it lands in the owner's funnel. Visitors never
+// become PostHog persons, and no visitor or bot text is ever sent. Every send
+// runs after the response and can't fail or slow the reply.
 
 /** Chunks retrieved per question. */
 export const MATCH_COUNT = 5;
@@ -39,16 +48,105 @@ const NOT_FOUND = () =>
   fail("not_found", "Unknown widget key or conversation.");
 const INTERNAL = () => fail("internal_error", "Something went wrong.");
 
-/** What Phase 4's PostHog AI trace needs, kept in one place. */
+/** What the PostHog AI trace needs (§6.6 step 7), kept in one place. */
 export type ChatTrace = Pick<
   Answer,
   "model" | "inputTokens" | "outputTokens" | "latencyMs"
-> & { projectId: string; chunks: number };
+> & {
+  projectId: string;
+  /** The project owner's Clerk ID: the event's distinct ID. */
+  ownerId: string;
+  /** The conversation, so a conversation's replies group into one trace. */
+  conversationId: string;
+  chunks: number;
+  /** Set when the model call failed: a short name, never the error's text. */
+  error?: string;
+};
 
-function recordTrace(trace: ChatTrace) {
-  // TODO(Phase 4): send the PostHog AI trace (model, tokens, cost, latency,
-  // project ID; project.md §6.6 step 7) once NEXT_PUBLIC_POSTHOG_KEY exists.
-  void trace;
+/** Runs `send` after the response. Analytics never fails the request. */
+function later(send: () => void | Promise<void>): void {
+  const run = async () => {
+    try {
+      await send();
+    } catch (error) {
+      console.warn("chat: analytics failed", error);
+    }
+  };
+  try {
+    after(run);
+  } catch {
+    // Outside a request scope (a script): run now, without waiting.
+    void run();
+  }
+}
+
+/** The `$ai_generation` event for one chat-model call (privacy mode: no text). */
+function recordTrace(trace: ChatTrace): void {
+  later(() =>
+    trackAiGeneration(trace.ownerId, {
+      model: trace.model,
+      inputTokens: trace.inputTokens,
+      outputTokens: trace.outputTokens,
+      latencyMs: trace.latencyMs,
+      projectId: trace.projectId,
+      traceId: trace.conversationId,
+      chunks: trace.chunks,
+      error: trace.error,
+    }),
+  );
+}
+
+/** A model error as a short, text-free label: its class name and HTTP status. */
+function errorLabel(err: unknown): string {
+  if (!(err instanceof Error)) return "Error";
+  const status = (err as { status?: unknown }).status;
+  return typeof status === "number" ? `${err.name} ${status}` : err.name;
+}
+
+/**
+ * `message_blocked` for the owner of the key's project. An unknown key sends
+ * nothing. Looked up after the response, so a blocked message stays cheap.
+ */
+function recordBlocked(key: string, reason: "rate_limit" | "injection"): void {
+  later(async () => {
+    const { data: project, error } = await createServiceClient()
+      .from("projects")
+      .select("id, owner_id")
+      .eq("public_key", key)
+      .maybeSingle();
+    if (error) throw dbError("blocked owner read", error);
+    if (!project) return;
+    track("message_blocked", project.owner_id, {
+      projectId: project.id,
+      reason,
+    });
+  });
+}
+
+/**
+ * `first_chat`, once per project: when the conversation save_chat_turn just
+ * created is the project's earliest one. Race-free: of two first
+ * conversations at once, only one is the earliest.
+ */
+function recordFirstChat(
+  projectId: string,
+  ownerId: string,
+  conversationId: string,
+): void {
+  later(async () => {
+    const { data: first, error } = await createServiceClient()
+      .from("conversations")
+      .select("id")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw dbError("first conversation read", error);
+    if (first?.id === conversationId) {
+      track("first_chat", ownerId, { projectId });
+    }
+  });
 }
 
 export async function handleChat(request: Request): Promise<ChatResult> {
@@ -67,7 +165,7 @@ export async function handleChat(request: Request): Promise<ChatResult> {
     message,
   });
   if (!protection.allowed) {
-    // TODO(Phase 4): `message_blocked` PostHog event, reason protection.reason.
+    recordBlocked(key, protection.reason);
     return protection.reason === "injection"
       ? fail("message_blocked", "This message can't be answered.")
       : fail("rate_limited", "Too many messages. Try again in a minute.");
@@ -79,7 +177,7 @@ export async function handleChat(request: Request): Promise<ChatResult> {
     // 3. Resolve the project by public key only.
     const { data: project, error: projectError } = await db
       .from("projects")
-      .select("id, accounts (plan)")
+      .select("id, owner_id, accounts (plan)")
       .eq("public_key", key)
       .maybeSingle();
     if (projectError) throw dbError("project read", projectError);
@@ -126,7 +224,25 @@ export async function handleChat(request: Request): Promise<ChatResult> {
     if (matchError) throw dbError("match_chunks", matchError);
 
     // 6. Answer. No chunks → "I don't know" without a chat-model call.
-    const answer = await answerFromChunks(message, chunks ?? []);
+    const started = performance.now();
+    let answer: Answer;
+    try {
+      answer = await answerFromChunks(message, chunks ?? []);
+    } catch (err) {
+      // A failed model call is traced too ($ai_is_error).
+      recordTrace({
+        model: CHAT_MODEL,
+        inputTokens: 0,
+        outputTokens: 0,
+        latencyMs: Math.round(performance.now() - started),
+        projectId: project.id,
+        ownerId: project.owner_id,
+        conversationId: conversationId ?? crypto.randomUUID(),
+        chunks: chunks?.length ?? 0,
+        error: errorLabel(err),
+      });
+      throw err;
+    }
 
     // 7. Save both messages; creates the conversation on the first message.
     const { data: savedId, error: saveError } = await db.rpc("save_chat_turn", {
@@ -140,15 +256,24 @@ export async function handleChat(request: Request): Promise<ChatResult> {
     if (saveError) throw dbError("save_chat_turn", saveError);
     if (!savedId) throw new Error("chat: save_chat_turn returned no id");
 
-    // 8. Trace (Phase 4).
-    recordTrace({
-      model: answer.model,
-      inputTokens: answer.inputTokens,
-      outputTokens: answer.outputTokens,
-      latencyMs: answer.latencyMs,
-      projectId: project.id,
-      chunks: chunks?.length ?? 0,
-    });
+    // 8. Trace: only a reply the chat model wrote ("I don't know" from no
+    // chunks makes no model call, so there's no generation to trace).
+    if ((chunks?.length ?? 0) > 0) {
+      recordTrace({
+        model: answer.model,
+        inputTokens: answer.inputTokens,
+        outputTokens: answer.outputTokens,
+        latencyMs: answer.latencyMs,
+        projectId: project.id,
+        ownerId: project.owner_id,
+        conversationId: savedId,
+        chunks: chunks?.length ?? 0,
+      });
+    }
+    // The project's very first conversation → first_chat (once per project).
+    if (!conversationId) {
+      recordFirstChat(project.id, project.owner_id, savedId);
+    }
 
     return {
       status: 200,
