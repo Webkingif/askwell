@@ -6,8 +6,9 @@
 //
 // Setup: a dedicated Clerk dev test user owns one throwaway project per run
 // (fresh quota and rate-limit key). The run deletes the source (file and
-// chunks) and the project afterwards. Each run spends about 21 real
-// messages, all from that throwaway project's quota.
+// chunks) and the project afterwards. Each run spends 2 real messages (2
+// Gemini answers), from that throwaway project's quota.
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
   expect,
@@ -48,18 +49,40 @@ const CHAT_PER_MINUTE = 20;
 
 const CLERK_API = "https://api.clerk.com/v1";
 
+/** Errors raised before a connection is up: the server never saw the request. */
+const NOT_SENT =
+  /before secure TLS connection was established|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/;
+
+/**
+ * Runs `send` again when it fails before reaching the server. On a flaky
+ * network (a sandbox proxy, say) that's safe even for a POST: the server
+ * never saw the first try, so nothing was created or counted twice.
+ */
+async function retryNotSent<T>(send: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await send();
+    } catch (err) {
+      if (attempt >= 4 || !NOT_SENT.test(String(err))) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+    }
+  }
+}
+
 async function clerk<T>(
   request: APIRequestContext,
   method: "GET" | "POST" | "DELETE",
   path: string,
   data?: unknown,
 ): Promise<T> {
-  const res = await request.fetch(`${CLERK_API}${path}`, {
-    method,
-    headers: { Authorization: `Bearer ${CLERK_SECRET_KEY}` },
-    // Clerk answers a POST with no JSON body with 415.
-    data: method === "POST" ? (data ?? {}) : data,
-  });
+  const res = await retryNotSent(() =>
+    request.fetch(`${CLERK_API}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${CLERK_SECRET_KEY}` },
+      // Clerk answers a POST with no JSON body with 415.
+      data: method === "POST" ? (data ?? {}) : data,
+    }),
+  );
   if (!res.ok()) {
     throw new Error(`Clerk ${method} ${path} → ${res.status()}`);
   }
@@ -114,11 +137,9 @@ class Owner {
       Authorization: `Bearer ${await this.token()}`,
     };
     if (SECRET) headers["x-vercel-protection-bypass"] = SECRET;
-    const res = await this.request.fetch(`${PREVIEW_URL}${path}`, {
-      method,
-      headers,
-      data,
-    });
+    const res = await retryNotSent(() =>
+      this.request.fetch(`${PREVIEW_URL}${path}`, { method, headers, data }),
+    );
     return { status: res.status(), body: (await res.json()) as T };
   }
 
@@ -129,14 +150,15 @@ class Owner {
   private async sources(
     filter: string,
   ): Promise<{ id: string; status: string }[]> {
-    const res = await this.request.get(
-      `${SUPABASE_URL}/rest/v1/knowledge_sources?select=id,status&${filter}`,
-      {
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${await this.token()}`,
-        },
-      },
+    const headers = {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${await this.token()}`,
+    };
+    const res = await retryNotSent(() =>
+      this.request.get(
+        `${SUPABASE_URL}/rest/v1/knowledge_sources?select=id,status&${filter}`,
+        { headers },
+      ),
     );
     expect(res.status()).toBe(200);
     return (await res.json()) as { id: string; status: string }[];
@@ -201,10 +223,12 @@ async function uploadPdf(
   expect(reserve.body.source.status).toBe("uploading");
   const sourceId = reserve.body.source.id;
 
-  const put = await request.put(reserve.body.uploadUrl, {
-    headers: { "Content-Type": "application/pdf" },
-    data: pdf,
-  });
+  const put = await retryNotSent(() =>
+    request.put(reserve.body.uploadUrl, {
+      headers: { "Content-Type": "application/pdf" },
+      data: pdf,
+    }),
+  );
   expect(put.status()).toBe(200);
 
   const finalize = await owner.api<{ source: { status: string } }>(
@@ -312,10 +336,11 @@ async function ask(page: Page, frame: Frame, text: string) {
   return res;
 }
 
-/** The text of the panel's last bot bubble. */
+/** The text of the panel's last bubble, without its screen-reader label. */
 async function lastReply(frame: Frame): Promise<string> {
   const log = frame.getByRole("log", { name: "Messages" });
-  return (await log.locator("li").last().innerText()).trim();
+  const text = (await log.locator("li").last().innerText()).trim();
+  return text.replace(/^Bot:\s*/, "");
 }
 
 // ------------------------------------------------------------------- spec
@@ -419,42 +444,40 @@ test("answers from the PDF, says I don't know, then rate limits", async ({
 
   // 3. Use up the rest of the minute's 20 straight against the route (same
   //    route, key and IP as the panel), then send the 21st in the panel.
-  //    The burst only has to get past Arcjet, so any status but 429 counts.
-  const { conversationId } = (await first.json()) as { conversationId: string };
+  //    The burst names a conversation that doesn't exist, so the route
+  //    answers 404 right after Arcjet (step 3): each one counts toward the
+  //    rate limit, but not toward the quota, and calls no AI.
   const visitorId = (first.request().postDataJSON() as { visitorId: string })
     .visitorId;
-  // A request that fails before it reaches the server (a network error) is
-  // retried: it never reached Arcjet, so it didn't count.
-  const send = async (i: number): Promise<APIResponse> => {
-    for (let attempt = 1; ; attempt++) {
-      try {
-        return await request.post(`${PREVIEW_URL}/api/widget/chat`, {
-          headers: SECRET ? { "x-vercel-protection-bypass": SECRET } : {},
-          data: {
-            key: project.publicKey,
-            visitorId,
-            conversationId,
-            message: `Do you sell bike bell number ${i + 3}?`,
-          },
-        });
-      } catch (err) {
-        if (attempt === 3) throw err;
-      }
-    }
-  };
+  const send = (i: number): Promise<APIResponse> =>
+    retryNotSent(() =>
+      request.post(`${PREVIEW_URL}/api/widget/chat`, {
+        headers: SECRET ? { "x-vercel-protection-bypass": SECRET } : {},
+        data: {
+          key: project.publicKey,
+          visitorId,
+          conversationId: randomUUID(),
+          message: `Do you sell bike bell number ${i + 3}?`,
+        },
+      }),
+    );
   const burst = await Promise.all(
     Array.from({ length: CHAT_PER_MINUTE - 2 }, (_, i) => send(i)),
   );
   const statuses = burst.map((r) => r.status());
   console.log(`burst statuses (messages 3–20): ${statuses.join(" ")}`);
-  expect(statuses.filter((s) => s === 429)).toEqual([]);
+  // 404 = past Arcjet and stopped at the conversation check.
+  expect(statuses).toEqual(Array(CHAT_PER_MINUTE - 2).fill(404));
 
   const limited = await ask(page, frame, "One more question, please?");
   expect(limited.status()).toBe(429);
   expect(
     ((await limited.json()) as { error: { code: string } }).error.code,
   ).toBe("rate_limited");
-  await expect(frame.getByRole("alert")).toContainText(RATE_LIMIT_NOTICE);
+  // Scoped to the message log: Next's route announcer is an alert too.
+  await expect(
+    frame.getByRole("log", { name: "Messages" }).getByRole("alert"),
+  ).toContainText(RATE_LIMIT_NOTICE);
   await page.screenshot({ path: test.info().outputPath("rate-limited.png") });
 
   expect(pageErrors).toEqual([]);
