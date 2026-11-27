@@ -242,7 +242,7 @@ Two parts: a small loader script + an iframe.
 | `projects`          | `id`, `owner_id` → accounts, `name`, `public_key`, `messages_used`, `period_start`, `created_at`                                     | `public_key` unique                                 |
 | `widget_configs`    | `project_id` (PK), `button_color`, `position`, `label`, `animation`, `header_text`, `show_badge`                                     | One per project                                     |
 | `knowledge_sources` | `id`, `project_id`, `title`, `type` (`text`/`pdf`/`md`/`txt`), `storage_key`, `status` (`uploading`/`processing`/`ready`/`failed`), `created_at` | `storage_key` null for pasted text                  |
-| `knowledge_chunks`  | `id`, `project_id`, `source_id`, `content`, `embedding vector(1536)`                                                                 | Deleted with the source. HNSW index on `embedding`. |
+| `knowledge_chunks`  | `id`, `project_id`, `source_id`, `content`, `embedding vector(1536)`                                                                 | Deleted with the source. HNSW index on `embedding`. Embeddings: `gemini-embedding-001` at 1536 dims (an old comment in the initial migration says text-embedding-3-small; it's wrong). |
 | `conversations`     | `id`, `project_id`, `visitor_id`, `created_at`                                                                                       |                                                     |
 | `messages`          | `id`, `conversation_id`, `role` (`visitor`/`bot`), `body`, `created_at`                                                              |                                                     |
 
