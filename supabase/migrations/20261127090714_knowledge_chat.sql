@@ -13,6 +13,13 @@
 --   22023 'invalid_status'      reserve_knowledge_source: p_status doesn't fit p_type
 --   23514 (check violation)     a table check failed (e.g. title length)
 
+-- Load pgvector in this session first. Until its library is loaded,
+-- hnsw.iterative_scan (set by match_chunks below) is an unknown placeholder,
+-- and Supabase's non-superuser postgres role is refused when CREATE FUNCTION
+-- sets it ("permission denied to set parameter"). Once loaded it is an
+-- ordinary user-settable parameter.
+select '[0]'::extensions.vector;
+
 -- ---------------------------------------------------------------------------
 -- Storage: private bucket for uploaded knowledge files
 -- ---------------------------------------------------------------------------
