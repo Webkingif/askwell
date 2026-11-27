@@ -58,24 +58,22 @@ const SUPABASE_STUB = /* sql */ `
   $$;
   grant execute on function auth.jwt() to anon, authenticated, service_role;
 
-  -- The columns of Supabase's storage.buckets that migrations write.
+  -- Supabase's storage.buckets (same column types and defaults), the only
+  -- storage object migrations touch.
   create schema storage;
   create table storage.buckets (
     id text primary key,
-    name text not null unique,
+    name text not null,
     owner uuid,
+    owner_id text,
     public boolean default false,
+    avif_autodetection boolean default false,
     file_size_limit bigint,
     allowed_mime_types text[],
     created_at timestamptz default now(),
     updated_at timestamptz default now()
   );
-  create table storage.objects (
-    id uuid primary key default gen_random_uuid(),
-    bucket_id text references storage.buckets (id),
-    name text
-  );
-  alter table storage.objects enable row level security;
+  create unique index bname on storage.buckets (name);
 
   -- Supabase grants every new object in public to the API roles.
   alter default privileges in schema public
