@@ -10,6 +10,7 @@ import {
   type CreateTextKnowledgeResponse,
 } from "@askwell/shared";
 import { createTextSource } from "../../../../../lib/knowledge-routes";
+import { track } from "../../../../../lib/analytics/events";
 import { processSource } from "../../../../../lib/knowledge/process";
 import { errorResponse, toErrorResponse } from "../../../../../lib/projects";
 
@@ -41,6 +42,11 @@ export async function POST(
     const source = await createTextSource(params.data.id, input.data);
     // The pasted text isn't stored, so processSource gets it here.
     after(() => processSource(source.id, { text: input.data.text }));
+    // IDs and the type only: no title, text or file name (project.md §9).
+    track("knowledge_added", userId, {
+      projectId: params.data.id,
+      type: source.type,
+    });
     const body: CreateTextKnowledgeResponse = { source };
     return NextResponse.json(body, { status: 201 });
   } catch (err) {

@@ -9,6 +9,7 @@ import {
 import type { Tables } from "@askwell/db";
 import { NextResponse } from "next/server";
 import { NotSignedInError, ensureAccount } from "./accounts";
+import { track } from "./analytics/events";
 import { createOwnerClient } from "./supabase/owner";
 import { createServiceClient } from "./supabase/service";
 
@@ -105,7 +106,12 @@ export async function createProject(name: string): Promise<Project> {
     }
     throw dbError("create", error);
   }
-  return toProject(data);
+  const project = toProject(data);
+  track("project_created", account.clerk_user_id, {
+    projectId: project.id,
+    plan: account.plan,
+  });
+  return project;
 }
 
 /** Rename one of the owner's projects. `name` is already validated. */

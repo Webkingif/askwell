@@ -29,23 +29,31 @@ vi.mock("../lib/supabase/service", () => ({
     from: (table: string) => {
       expect(table).toBe("accounts");
       return {
-        upsert: async (
+        upsert: (
           values: { clerk_user_id: string },
           options: { onConflict: string; ignoreDuplicates: boolean },
-        ) => {
-          db.upserts.push({ values, options });
-          if (db.insertError) return { error: db.insertError };
-          // ON CONFLICT DO NOTHING when ignoreDuplicates, else overwrite.
-          const existing = db.rows.get(values.clerk_user_id);
-          if (!existing || !options.ignoreDuplicates) {
-            db.rows.set(values.clerk_user_id, {
-              plan: "free",
-              ...existing,
-              ...values,
-            });
-          }
-          return { error: null };
-        },
+        ) => ({
+          // INSERT … ON CONFLICT … RETURNING: only rows it wrote come back.
+          select: async (cols: string) => {
+            expect(cols).toBe("clerk_user_id");
+            db.upserts.push({ values, options });
+            if (db.insertError) return { data: null, error: db.insertError };
+            // ON CONFLICT DO NOTHING when ignoreDuplicates, else overwrite.
+            const existing = db.rows.get(values.clerk_user_id);
+            if (!existing || !options.ignoreDuplicates) {
+              db.rows.set(values.clerk_user_id, {
+                plan: "free",
+                ...existing,
+                ...values,
+              });
+              return {
+                data: [{ clerk_user_id: values.clerk_user_id }],
+                error: null,
+              };
+            }
+            return { data: [], error: null };
+          },
+        }),
       };
     },
   }),
@@ -85,6 +93,10 @@ vi.mock("../lib/supabase/owner", () => ({
   }),
 }));
 
+// Product events: recorded here, sent by lib/analytics/events in the app.
+const analytics = vi.hoisted(() => ({ track: vi.fn() }));
+vi.mock("../lib/analytics/events", () => analytics);
+
 const { ensureAccount, NotSignedInError } = await import("../lib/accounts");
 
 function signIn(id: string) {
@@ -100,6 +112,7 @@ beforeEach(() => {
   db.readError = null;
   db.ownerSub = null;
   db.ownerFilters = [];
+  analytics.track.mockClear();
 });
 
 describe("ensureAccount", () => {
@@ -199,6 +212,31 @@ describe("ensureAccount", () => {
     await expect(ensureAccount()).rejects.toThrow(
       "ensureAccount: account not visible to owner",
     );
+  });
+
+  it("sends signed_up once, when it inserts the account", async () => {
+    signIn("user_new");
+    await ensureAccount();
+    expect(analytics.track).toHaveBeenCalledTimes(1);
+    expect(analytics.track).toHaveBeenCalledWith("signed_up", "user_new", {});
+    // Later dashboard loads, one after another and at once, send no more.
+    await ensureAccount();
+    await Promise.all([ensureAccount(), ensureAccount()]);
+    expect(analytics.track).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends no signed_up for an existing account", async () => {
+    db.rows.set("user_old", { clerk_user_id: "user_old", plan: "free" });
+    signIn("user_old");
+    await ensureAccount();
+    expect(analytics.track).not.toHaveBeenCalled();
+  });
+
+  it("sends no signed_up when the insert fails", async () => {
+    signIn("user_a");
+    db.insertError = { code: "42501", message: "permission denied" };
+    await ensureAccount().catch(() => undefined);
+    expect(analytics.track).not.toHaveBeenCalled();
   });
 
   it("rejects a plan value it doesn't know", async () => {

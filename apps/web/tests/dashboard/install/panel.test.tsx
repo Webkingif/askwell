@@ -5,11 +5,24 @@ import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { InstallPanel } from "../../../components/install";
 
+// The Install tab's URL: /dashboard/projects/[projectId]/install.
+const route = vi.hoisted(() => ({
+  params: { projectId: "11111111-2222-4333-8444-555555555555" } as {
+    projectId?: string;
+  } | null,
+}));
+vi.mock("next/navigation", () => ({ useParams: () => route.params }));
+
+const analytics = vi.hoisted(() => ({ trackClient: vi.fn() }));
+vi.mock("../../../lib/analytics/client", () => analytics);
+
 const SNIPPET =
   '<script src="https://app.example.com/widget.js" data-key="pk_aaaaaaaaaaaaaaaaaaaa" async></script>';
 
 afterEach(() => {
   cleanup();
+  analytics.trackClient.mockClear();
+  route.params = { projectId: "11111111-2222-4333-8444-555555555555" };
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -64,5 +77,35 @@ describe("InstallPanel", () => {
     await user.click(screen.getByRole("button", { name: "Copy" }));
     expect(screen.getByText(/Press Ctrl\+C/)).toBeTruthy();
     expect(window.getSelection()?.toString()).toBe(SNIPPET);
+  });
+
+  it("sends snippet_copied once per click, with the project ID only", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(navigator, "clipboard", "get").mockReturnValue({
+      writeText: async () => {},
+    } as unknown as Clipboard);
+    render(<InstallPanel snippet={SNIPPET} />);
+    expect(analytics.trackClient).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+    expect(analytics.trackClient).toHaveBeenCalledExactlyOnceWith(
+      "snippet_copied",
+      { projectId: "11111111-2222-4333-8444-555555555555" },
+    );
+    // Never the snippet or its public key.
+    expect(JSON.stringify(analytics.trackClient.mock.calls)).not.toMatch(
+      /pk_|script/,
+    );
+  });
+
+  it("sends nothing outside a project route", async () => {
+    route.params = null;
+    const user = userEvent.setup();
+    vi.spyOn(navigator, "clipboard", "get").mockReturnValue({
+      writeText: async () => {},
+    } as unknown as Clipboard);
+    render(<InstallPanel snippet={SNIPPET} />);
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+    expect(analytics.trackClient).not.toHaveBeenCalled();
   });
 });

@@ -27,6 +27,10 @@ vi.mock("../../lib/accounts", async (importOriginal) => {
   };
 });
 
+// Product events: recorded here, sent by lib/analytics/events in the app.
+const analytics = vi.hoisted(() => ({ track: vi.fn() }));
+vi.mock("../../lib/analytics/events", () => analytics);
+
 const collection = await import("../../app/api/projects/route");
 const item = await import("../../app/api/projects/[id]/route");
 
@@ -59,6 +63,7 @@ const errorBody = (code: string) => ({
 beforeEach(() => {
   resetStore();
   signIn(null);
+  analytics.track.mockClear();
 });
 
 describe("GET /api/projects", () => {
@@ -124,6 +129,26 @@ describe("POST /api/projects", () => {
     expect(store.calls).toEqual(["service:rpc:create_project"]);
   });
 
+  it("sends project_created once, with the project ID and plan only", async () => {
+    store.plans.set(A, "pro");
+    signIn(A);
+    const { body } = await read(await collection.POST(json({ name: "Mine" })));
+    const { project } = body as { project: { id: string } };
+    expect(analytics.track).toHaveBeenCalledTimes(1);
+    expect(analytics.track).toHaveBeenCalledWith("project_created", A, {
+      projectId: project.id,
+      plan: "pro",
+    });
+  });
+
+  it("sends no project_created when create_project refuses", async () => {
+    signIn(A);
+    await collection.POST(json({ name: "First" }));
+    analytics.track.mockClear();
+    expect((await collection.POST(json({ name: "Second" }))).status).toBe(402);
+    expect(analytics.track).not.toHaveBeenCalled();
+  });
+
   it("402 plan_limit_reached on the second Free project", async () => {
     signIn(A);
     expect((await collection.POST(json({ name: "First" }))).status).toBe(201);
@@ -177,6 +202,7 @@ describe("POST /api/projects", () => {
     expect(status).toBe(401);
     expect(body).toEqual(errorBody("unauthorized"));
     expect(store.calls).toEqual([]);
+    expect(analytics.track).not.toHaveBeenCalled();
   });
 });
 

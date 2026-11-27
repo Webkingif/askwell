@@ -8,6 +8,7 @@ import {
   type FinalizeKnowledgeResponse,
 } from "@askwell/shared";
 import { finalizeSource } from "../../../../../../lib/knowledge-routes";
+import { track } from "../../../../../../lib/analytics/events";
 import { processSource } from "../../../../../../lib/knowledge/process";
 import { errorResponse, toErrorResponse } from "../../../../../../lib/projects";
 
@@ -35,6 +36,11 @@ export async function POST(
   try {
     const source = await finalizeSource(params.data.id, input.data.sourceId);
     after(() => processSource(source.id));
+    // IDs and the type only: no title, text or file name (project.md §9).
+    track("knowledge_added", userId, {
+      projectId: params.data.id,
+      type: source.type,
+    });
     const body: FinalizeKnowledgeResponse = { source };
     return NextResponse.json(body);
   } catch (err) {

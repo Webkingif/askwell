@@ -1,6 +1,8 @@
 "use client";
 
+import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { trackClient } from "../../lib/analytics/client";
 import { Button } from "../ui";
 
 type Status = "idle" | "copied" | "manual";
@@ -8,6 +10,8 @@ type Status = "idle" | "copied" | "manual";
 /**
  * Copies `text`. If the Clipboard API is missing or refused, it selects the
  * snippet (the element with `targetId`) so the user can press Ctrl/⌘+C.
+ * Either way it sends `snippet_copied` with the project ID from the URL
+ * (/dashboard/projects/[projectId]/install), never the snippet or its key.
  */
 export function CopyButton({
   text,
@@ -16,6 +20,11 @@ export function CopyButton({
   text: string;
   targetId: string;
 }) {
+  // Null outside the app router (a test, say): then nothing is sent.
+  const params = useParams<{ projectId?: string }>() as {
+    projectId?: string;
+  } | null;
+  const projectId = params?.projectId;
   const [status, setStatus] = useState<Status>("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -31,6 +40,7 @@ export function CopyButton({
 
   async function onCopy() {
     clearTimeout(timer.current);
+    if (projectId) trackClient("snippet_copied", { projectId });
     try {
       if (!navigator.clipboard) throw new Error("no clipboard");
       await navigator.clipboard.writeText(text);

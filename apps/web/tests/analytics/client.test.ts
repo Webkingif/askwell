@@ -5,6 +5,7 @@ import {
   resetAnalyticsForTests,
   setAnalyticsUser,
   startAnalytics,
+  trackClient,
   type AnalyticsDeps,
 } from "../../lib/analytics/client";
 import { isEmbedPath, isTrackedPath } from "../../lib/analytics/paths";
@@ -22,6 +23,7 @@ function fakePostHog() {
       state.distinctId = "anon-2";
       state.identified = false;
     }),
+    capture: vi.fn(),
     get_distinct_id: () => state.distinctId,
     _isIdentified: () => state.identified,
   };
@@ -144,5 +146,31 @@ describe("setAnalyticsUser", () => {
 
   it("does nothing where PostHog never started", () => {
     expect(() => setAnalyticsUser("user_1")).not.toThrow();
+  });
+});
+
+describe("trackClient", () => {
+  it("sends the event once PostHog has started", async () => {
+    const { ph, d } = deps();
+    await startAnalytics("/dashboard/projects/p1/install", d);
+    trackClient("snippet_copied", { projectId: "p1" });
+    expect(ph.capture).toHaveBeenCalledExactlyOnceWith("snippet_copied", {
+      projectId: "p1",
+    });
+  });
+
+  it("is a no-op without a key or on /embed, and never throws", async () => {
+    const noKey = deps({ key: null, host: null });
+    await startAnalytics("/dashboard", noKey.d);
+    expect(() =>
+      trackClient("snippet_copied", { projectId: "p1" }),
+    ).not.toThrow();
+    expect(noKey.ph.capture).not.toHaveBeenCalled();
+
+    resetAnalyticsForTests();
+    const embed = deps();
+    await startAnalytics("/embed", embed.d);
+    trackClient("snippet_copied", { projectId: "p1" });
+    expect(embed.ph.capture).not.toHaveBeenCalled();
   });
 });

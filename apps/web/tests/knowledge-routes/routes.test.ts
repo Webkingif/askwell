@@ -42,6 +42,10 @@ vi.mock("../../lib/accounts", async (importOriginal) => {
   };
 });
 
+// Product events: recorded here, sent by lib/analytics/events in the app.
+const analytics = vi.hoisted(() => ({ track: vi.fn() }));
+vi.mock("../../lib/analytics/events", () => analytics);
+
 const paste = await import("../../app/api/projects/[id]/knowledge/route");
 const uploadUrl = await import("../../app/api/projects/[id]/knowledge/upload-url/route");
 const finalize = await import("../../app/api/projects/[id]/knowledge/finalize/route");
@@ -91,6 +95,7 @@ beforeEach(() => {
   signIn(null);
   afterQueue.length = 0;
   processSource.mockClear();
+  analytics.track.mockClear();
 });
 
 /** No owner route sends CORS headers (project.md §9). */
@@ -163,6 +168,28 @@ describe("POST /api/projects/:id/knowledge (paste)", () => {
     expect(afterQueue).toHaveLength(1);
     await afterQueue[0]!();
     expect(processSource).toHaveBeenCalledWith(row.id, { text: "We open at nine." });
+  });
+
+  it("sends knowledge_added once, with the project ID and type only", async () => {
+    signIn(A);
+    const p = addProject(A);
+    await paste.POST(post(textBody), ctx(String(p.id)));
+    expect(analytics.track).toHaveBeenCalledTimes(1);
+    expect(analytics.track).toHaveBeenCalledWith("knowledge_added", A, {
+      projectId: p.id,
+      type: "text",
+    });
+    // No title or text in the event.
+    expect(JSON.stringify(analytics.track.mock.calls)).not.toMatch(/FAQ|nine/);
+  });
+
+  it("sends no knowledge_added when the paste is refused", async () => {
+    signIn(A);
+    const p = addProject(A);
+    for (let i = 0; i < FREE_LIMIT; i++) addSource(String(p.id));
+    expect((await paste.POST(post(textBody), ctx(String(p.id)))).status).toBe(402);
+    expect((await paste.POST(post({}), ctx(String(p.id)))).status).toBe(400);
+    expect(analytics.track).not.toHaveBeenCalled();
   });
 
   it("402s at the Free limit, and Pro gets its own limit", async () => {
@@ -389,6 +416,22 @@ describe("POST /api/projects/:id/knowledge/finalize", () => {
     expect(afterQueue).toHaveLength(1);
     await afterQueue[0]!();
     expect(processSource).toHaveBeenCalledWith(s.id);
+  });
+
+  it("sends knowledge_added once on finalize, with no file name", async () => {
+    signIn(A);
+    const p = addProject(A);
+    const s = upload(String(p.id), { title: "Manual v2" });
+    await finalize.POST(post({ sourceId: s.id }), ctx(String(p.id)));
+    expect(analytics.track).toHaveBeenCalledTimes(1);
+    expect(analytics.track).toHaveBeenCalledWith("knowledge_added", A, {
+      projectId: p.id,
+      type: "pdf",
+    });
+    expect(JSON.stringify(analytics.track.mock.calls)).not.toMatch(/Manual|file\.pdf/);
+    // A second finalize is refused (409) and sends nothing more.
+    await finalize.POST(post({ sourceId: s.id }), ctx(String(p.id)));
+    expect(analytics.track).toHaveBeenCalledTimes(1);
   });
 
   it("accepts Markdown and TXT without a magic-byte check", async () => {
