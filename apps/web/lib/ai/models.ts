@@ -16,7 +16,8 @@ export const EMBEDDING_DIMENSIONS = 1536;
  * Chat model: the newest stable Gemini Flash-Lite, chosen for its free-tier
  * daily limit (product owner, 2026-11-27). gemini-4-hydrogen's free tier
  * allowed 20 answers a day per Google project, shared by every customer
- * project. Free tier for this model: 15 requests a minute per Google
- * project (a 429's quotaValue); the daily limit is in docs/project.md §3.
+ * project. Free tier for this model, per Google project and shared by
+ * every customer project: 500 requests a day, 15 a minute and 250,000
+ * tokens a minute (AI Studio, 2026-11-27; docs/project.md §3).
  */
 export const CHAT_MODEL = "gemini-3.5-flash-lite";
