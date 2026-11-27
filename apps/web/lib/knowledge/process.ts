@@ -26,7 +26,7 @@ export type ProcessResult =
   | { status: "failed"; reason: ProcessFailure };
 
 export type ProcessInput = {
-  /** The pasted text, for a `text` source (it isn't stored anywhere else). */
+  /** The pasted text, for a `text` source: required, as it isn't stored anywhere. */
   text?: string;
 };
 
@@ -54,6 +54,11 @@ class ProcessError extends Error {
  * chunks, embeds, stores the chunks under the source's own project, and sets
  * the source `ready`. On any failure it removes the source's chunks and sets
  * it `failed`. It never throws.
+ *
+ * Pasted text is not stored anywhere (a `text` source has no storage_key, and
+ * knowledge_sources has no content column), so A3's paste route must pass the
+ * request's text as `input.text`; without it the source ends `failed`
+ * (`missing_text`). File sources ignore `input`.
  *
  * Uses the service client: call it only after the route has checked that the
  * owner owns the source's project (project.md §9).
