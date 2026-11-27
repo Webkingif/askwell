@@ -106,6 +106,12 @@ $$;
 -- ---------------------------------------------------------------------------
 -- match_chunks: nearest chunks of one project's ready sources
 -- ---------------------------------------------------------------------------
+--
+-- When the planner uses the HNSW index, a plain scan returns only the
+-- hnsw.ef_search (40) nearest chunks across all projects and filters after,
+-- so a small project could get nothing. iterative_scan = strict_order
+-- (pgvector >= 0.8) keeps scanning until p_count rows pass the project and
+-- ready filters, in exact distance order (bounded by hnsw.max_scan_tuples).
 
 create function public.match_chunks(
   p_project_id uuid,
@@ -122,6 +128,7 @@ language sql
 stable
 security invoker
 set search_path = ''
+set hnsw.iterative_scan = strict_order
 as $$
   select
     c.id,

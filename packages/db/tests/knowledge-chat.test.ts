@@ -336,6 +336,85 @@ describe("match_chunks", () => {
     expect(rows).toEqual([]);
   });
 
+  it("still finds a small project's chunks when the HNSW index is used and 40+ closer chunks belong to another project", async () => {
+    const BIG = "eeeeeeee-0000-4000-8000-000000000011";
+    const bigSource = "eeeeeeee-0000-4000-8000-000000000012";
+    const SMALL = "eeeeeeee-0000-4000-8000-000000000021";
+    const smallSource = "eeeeeeee-0000-4000-8000-000000000022";
+
+    // Everything runs in one transaction that is rolled back, so the dropped
+    // indexes and seeded rows don't leak into other tests.
+    const rollback = new Error("rollback");
+    let viaFunction: MatchRow[] = [];
+    let withoutIterativeScan: unknown[] = [];
+    let plan = "";
+    await expect(
+      sb.db.transaction(async (tx) => {
+        await tx.query(
+          `insert into public.projects (id, owner_id, name, public_key) values
+            ($1, 'user_a', 'Big', 'pk_bigbigbigbigbigbigbig'),
+            ($2, 'user_b', 'Small', 'pk_smallsmallsmallsmall')`,
+          [BIG, SMALL],
+        );
+        await tx.query(
+          `insert into public.knowledge_sources (id, project_id, title, type, status) values
+            ($1, $2, 'Big', 'text', 'ready'), ($3, $4, 'Small', 'text', 'ready')`,
+          [bigSource, BIG, smallSource, SMALL],
+        );
+        // 60 chunks in BIG right on the query, closer than every SMALL chunk.
+        for (let i = 0; i < 60; i++) {
+          await tx.query(
+            "insert into public.knowledge_chunks (project_id, source_id, content, embedding) values ($1, $2, $3, $4)",
+            [BIG, bigSource, `big-${i}`, axis(0, i * 0.001)],
+          );
+        }
+        for (let i = 0; i < 6; i++) {
+          await tx.query(
+            "insert into public.knowledge_chunks (project_id, source_id, content, embedding) values ($1, $2, $3, $4)",
+            [SMALL, smallSource, `small-${i}`, axis(0, 1 + i * 0.1)],
+          );
+        }
+
+        // Leave the HNSW index as the only way into knowledge_chunks.
+        await tx.exec(`
+          drop index public.knowledge_chunks_project_id_idx;
+          drop index public.knowledge_chunks_source_id_project_id_idx;
+          set local enable_seqscan = off;
+          set local enable_bitmapscan = off;
+        `);
+
+        const plain = `select c.id
+          from public.knowledge_chunks c
+          join public.knowledge_sources s on s.id = c.source_id and s.project_id = c.project_id
+          where c.project_id = $1 and s.status = 'ready'
+          order by c.embedding operator(extensions.<=>) $2::extensions.vector
+          limit 5`;
+        const explain = await tx.query<{ "QUERY PLAN": string }>(
+          `explain ${plain}`,
+          [SMALL, axis(0)],
+        );
+        plan = explain.rows.map((r) => r["QUERY PLAN"]).join("\n");
+        // Control: the same query without iterative scan loses SMALL's chunks.
+        withoutIterativeScan = (await tx.query(plain, [SMALL, axis(0)])).rows;
+
+        await tx.exec("set local role service_role");
+        viaFunction = (await tx.query<MatchRow>(MATCH, [SMALL, axis(0), 5])).rows;
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+
+    expect(plan).toContain("knowledge_chunks_embedding_idx");
+    expect(withoutIterativeScan).toEqual([]);
+    expect(viaFunction.map((r) => r.content)).toEqual([
+      "small-0",
+      "small-1",
+      "small-2",
+      "small-3",
+      "small-4",
+    ]);
+    expect(await count(sb, "projects", `id = '${SMALL}'`)).toBe(0);
+  });
+
   it("rejects an embedding that isn't 1536-dim", async () => {
     await expect(
       service().query(MATCH, [P, "[1,0,0]", 5]),
@@ -534,7 +613,10 @@ describe("grants", () => {
       );
       expect(rows[0]).toEqual({
         prosecdef: false,
-        proconfig: ['search_path=""'],
+        proconfig:
+          name === "match_chunks"
+            ? ['search_path=""', "hnsw.iterative_scan=strict_order"]
+            : ['search_path=""'],
         anon: false,
         authenticated: false,
         service_role: true,
