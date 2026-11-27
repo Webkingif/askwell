@@ -2,7 +2,8 @@
 // Never a local Supabase stack or a Docker database (CLAUDE.md "Database rules").
 //
 // It stubs what Supabase provides before our migrations run: the API roles,
-// the `auth` and `extensions` schemas, `auth.jwt()`, and Supabase's default
+// the `auth`, `extensions` and `storage` schemas (storage: just the tables
+// migrations touch), `auth.jwt()`, and Supabase's default
 // privileges (every new table and function is granted to the API roles), so
 // the migrations' revokes are tested against the same starting point.
 import { readdir, readFile } from "node:fs/promises";
@@ -56,6 +57,25 @@ const SUPABASE_STUB = /* sql */ `
     )::jsonb
   $$;
   grant execute on function auth.jwt() to anon, authenticated, service_role;
+
+  -- The columns of Supabase's storage.buckets that migrations write.
+  create schema storage;
+  create table storage.buckets (
+    id text primary key,
+    name text not null unique,
+    owner uuid,
+    public boolean default false,
+    file_size_limit bigint,
+    allowed_mime_types text[],
+    created_at timestamptz default now(),
+    updated_at timestamptz default now()
+  );
+  create table storage.objects (
+    id uuid primary key default gen_random_uuid(),
+    bucket_id text references storage.buckets (id),
+    name text
+  );
+  alter table storage.objects enable row level security;
 
   -- Supabase grants every new object in public to the API roles.
   alter default privileges in schema public

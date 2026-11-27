@@ -251,6 +251,13 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      consume_message: {
+        Args: { p_limit: number; p_project_id: string }
+        Returns: {
+          allowed: boolean
+          messages_used: number
+        }[]
+      }
       create_project: {
         Args: { p_max_projects: number; p_name: string; p_owner_id: string }
         Returns: {
@@ -269,8 +276,52 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      match_chunks: {
+        Args: { p_count?: number; p_embedding: string; p_project_id: string }
+        Returns: {
+          content: string
+          id: string
+          similarity: number
+          source_id: string
+        }[]
+      }
       owned_conversation_ids: { Args: never; Returns: string[] }
       owned_project_ids: { Args: never; Returns: string[] }
+      reserve_knowledge_source: {
+        Args: {
+          p_limit: number
+          p_project_id: string
+          p_status: string
+          p_storage_key: string
+          p_title: string
+          p_type: string
+        }
+        Returns: {
+          created_at: string
+          id: string
+          project_id: string
+          status: string
+          storage_key: string | null
+          title: string
+          type: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "knowledge_sources"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      save_chat_turn: {
+        Args: {
+          p_bot_body: string
+          p_conversation_id: string
+          p_project_id: string
+          p_visitor_body: string
+          p_visitor_id: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never
