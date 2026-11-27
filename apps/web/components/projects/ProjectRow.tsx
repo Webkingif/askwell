@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { MAX_PROJECT_NAME_LENGTH, type Project } from "@askwell/shared";
-import { projectPath } from "../dashboard/nav";
+import type { Usage } from "../../lib/usage";
+import { projectPath, projectTabPath } from "../dashboard/nav";
+import { usageText } from "../usage/format";
 import { Button, Input } from "../ui";
 import { projectsApi } from "./api";
 
@@ -20,8 +22,17 @@ export function formatCreated(iso: string): string {
   return dateFormat.format(new Date(iso));
 }
 
-/** One project: open it, rename it, or delete it after typing its name. */
-export function ProjectRow({ project }: { project: Project }) {
+/**
+ * One project: open it, rename it, or delete it after typing its name.
+ * `usage` (computed on the server) adds a "X / Y messages" line.
+ */
+export function ProjectRow({
+  project,
+  usage,
+}: {
+  project: Project;
+  usage?: Usage;
+}) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("view");
   const [draft, setDraft] = useState(project.name);
@@ -111,6 +122,19 @@ export function ProjectRow({ project }: { project: Project }) {
                 {formatCreated(project.createdAt)}
               </time>
             </p>
+            {usage && (
+              <p className="text-xs text-muted">
+                <Link
+                  href={projectTabPath(project.id, "usage")}
+                  className="focus-ring rounded-sm hover:underline"
+                >
+                  {usageText(usage.used, usage.limit)} this month
+                </Link>
+                {usage.atLimit && (
+                  <span className="font-medium text-fg"> · Limit reached</span>
+                )}
+              </p>
+            )}
           </div>
           {mode === "view" && (
             <div className="flex shrink-0 gap-2">
