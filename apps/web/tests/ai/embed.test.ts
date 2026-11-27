@@ -18,13 +18,22 @@ type EmbedArgs = {
 const vector = (fill: number, length = EMBEDDING_DIMENSIONS) =>
   Array.from({ length }, () => fill);
 
-/** Answers each request with one vector per text; the fill is its index. */
+/**
+ * Answers each request with one vector per text. Each vector's first value
+ * is (index + 1) and the rest are 1, so v[0] / v[1] survives normalizing.
+ */
 function echoVectors() {
   let n = 0;
   sdk.embedContent.mockImplementation(async ({ contents }: EmbedArgs) => ({
-    embeddings: contents.map(() => ({ values: vector(n++) })),
+    embeddings: contents.map(() => {
+      const values = vector(1);
+      values[0] = ++n;
+      return { values };
+    }),
   }));
 }
+
+const length = (v: number[]) => Math.hypot(...v);
 
 const calls = () => sdk.embedContent.mock.calls.map(([a]) => a as EmbedArgs);
 
@@ -60,7 +69,23 @@ describe("embedTexts", () => {
       50,
     ]);
     expect(calls()[1].contents[0]).toBe("t100");
-    expect(vectors.map((v) => v[0])).toEqual(texts.map((_, i) => i));
+    expect(vectors.map((v) => Math.round(v[0] / v[1]))).toEqual(
+      texts.map((_, i) => i + 1),
+    );
+  });
+
+  it("returns unit vectors (001 does not normalize below 3072 dims)", async () => {
+    sdk.embedContent.mockResolvedValue({
+      embeddings: [{ values: vector(3) }],
+    });
+    const [v] = await embedTexts(["a"]);
+    expect(length(v)).toBeCloseTo(1, 10);
+    expect(v[0]).toBeCloseTo(1 / Math.sqrt(1536), 10);
+  });
+
+  it("refuses a zero vector", async () => {
+    sdk.embedContent.mockResolvedValue({ embeddings: [{ values: vector(0) }] });
+    await expect(embedTexts(["a"])).rejects.toThrow(/zero vector/);
   });
 
   it("makes no call for no texts", async () => {

@@ -16,9 +16,6 @@ export type Answer = {
   latencyMs: number;
 };
 
-/** Low, so answers stay close to the chunks. */
-export const CHAT_TEMPERATURE = 0.2;
-
 /**
  * Answers a visitor's question from the retrieved chunks only.
  * With no chunks it replies "I don't know" without calling the model.
@@ -41,10 +38,9 @@ export async function answerFromChunks(
   const response = await ai.models.generateContent({
     model: CHAT_MODEL,
     contents: buildUserPrompt(question, chunks),
-    config: {
-      systemInstruction: SYSTEM_PROMPT,
-      temperature: CHAT_TEMPERATURE,
-    },
+    // No temperature: Gemini 4 ignores sampling parameters and Google says
+    // to remove them. The system prompt keeps answers to the chunks.
+    config: { systemInstruction: SYSTEM_PROMPT },
   });
   const usage = response.usageMetadata;
   return {

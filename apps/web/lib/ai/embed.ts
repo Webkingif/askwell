@@ -2,16 +2,16 @@ import "server-only";
 import { createGeminiClient } from "./client";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from "./models";
 
-/** Most texts the Gemini API embeds in one request. */
+/** Most texts the Gemini API embeds in one request (batchEmbedContents). */
 export const EMBED_BATCH_SIZE = 100;
 
 /** Documents are stored; queries are matched against them. */
 export type EmbedTaskType = "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY";
 
 /**
- * Embeds texts with gemini-embedding-001 at 1536 dims, in order.
- * Sends at most EMBED_BATCH_SIZE texts per request. Throws if the API
- * returns the wrong number of vectors or a vector of the wrong length.
+ * Embeds texts with gemini-embedding-001 at 1536 dims, in order, as unit
+ * vectors. Sends at most EMBED_BATCH_SIZE texts per request. Throws if the
+ * API returns the wrong number of vectors or a vector of the wrong length.
  */
 export async function embedTexts(
   texts: string[],
@@ -60,5 +60,9 @@ function checkVector(values: number[] | undefined): number[] {
   if (!values.every(Number.isFinite)) {
     throw new Error("Gemini embeddings: vector holds a non-finite value");
   }
-  return values;
+  // gemini-embedding-001 only normalizes 3072-dim output; Google says to
+  // normalize smaller ones yourself.
+  const norm = Math.hypot(...values);
+  if (norm === 0) throw new Error("Gemini embeddings: zero vector");
+  return values.map((v) => v / norm);
 }

@@ -4,8 +4,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("@google/genai", () => import("./sdk-mock"));
 
 const sdk = await import("./sdk-mock");
-const { answerFromChunks, CHAT_TEMPERATURE } =
-  await import("../../lib/ai/answer");
+const { answerFromChunks } = await import("../../lib/ai/answer");
 const { CHAT_MODEL } = await import("../../lib/ai/models");
 const { SYSTEM_PROMPT, I_DONT_KNOW } = await import("../../lib/ai/prompt");
 
@@ -18,7 +17,7 @@ afterEach(() => {
 });
 
 describe("answerFromChunks", () => {
-  it("sends the system prompt, delimited chunks and a low temperature", async () => {
+  it("sends the system prompt and delimited chunks, no temperature", async () => {
     sdk.generateContent.mockResolvedValue({
       text: "We're open 9 to 5.",
       modelVersion: "gemini-x-001",
@@ -39,8 +38,8 @@ describe("answerFromChunks", () => {
     const [args] = sdk.generateContent.mock.calls[0];
     expect(args.model).toBe(CHAT_MODEL);
     expect(args.config.systemInstruction).toBe(SYSTEM_PROMPT);
-    expect(args.config.temperature).toBe(CHAT_TEMPERATURE);
-    expect(CHAT_TEMPERATURE).toBeLessThanOrEqual(0.3);
+    // Gemini 4 ignores sampling parameters; Google says to remove them.
+    expect(args.config).not.toHaveProperty("temperature");
     expect(args.contents).toContain(
       '<chunk index="1">\nSupport is open 9 to 5.\n</chunk>',
     );
