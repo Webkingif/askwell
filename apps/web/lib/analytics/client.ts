@@ -13,7 +13,14 @@ export const POSTHOG_CONFIG_PATH = "/api/posthog-config";
 export type AnalyticsDeps = {
   fetchConfig: () => Promise<PostHogConfigResponse>;
   loadPostHog: () => Promise<PostHog>;
+  /** The URL's path right now (window.location); the target path where there's no window. */
+  currentPath?: () => string;
+  sleep?: (ms: number) => Promise<void>;
 };
+
+/** How long a client-side navigation may take to reach its URL before PostHog starts anyway. */
+export const NAVIGATION_WAIT_MS = 3000;
+const NAVIGATION_POLL_MS = 50;
 
 const defaultDeps: AnalyticsDeps = {
   fetchConfig: async () => {
@@ -23,6 +30,33 @@ const defaultDeps: AnalyticsDeps = {
   },
   loadPostHog: async () => (await import("posthog-js")).default,
 };
+
+const browserPath = () =>
+  typeof window === "undefined" ? null : window.location.pathname;
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Waits until the URL shows `pathname`, and returns the path it ended on.
+ * onRouterTransitionStart fires before the URL changes, and init's first
+ * $pageview reads the URL: without this, a move from /sign-in to /dashboard
+ * was recorded as a /sign-in pageview.
+ */
+async function untilPath(
+  pathname: string,
+  deps: AnalyticsDeps,
+): Promise<string> {
+  const current = deps.currentPath ?? (() => browserPath() ?? pathname);
+  const sleep = deps.sleep ?? wait;
+  for (
+    let waited = 0;
+    waited < NAVIGATION_WAIT_MS;
+    waited += NAVIGATION_POLL_MS
+  ) {
+    if (current() === pathname) return pathname;
+    await sleep(NAVIGATION_POLL_MS);
+  }
+  return current();
+}
 
 let started: Promise<PostHog | null> | null = null;
 let instance: PostHog | null = null;
@@ -58,6 +92,11 @@ export function startAnalytics(
       const config = await deps.fetchConfig();
       if (!config.key || !config.host) return null;
       const posthog = await deps.loadPostHog();
+      // The move went somewhere untracked: don't start (a later move may).
+      if (!isTrackedPath(await untilPath(pathname, deps))) {
+        started = null;
+        return null;
+      }
       posthog.init(config.key, posthogOptions(config.host));
       instance = posthog;
       applyUser(posthog, userId);

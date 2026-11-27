@@ -1,16 +1,22 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const loaded = vi.hoisted(() => ({ posthog: false }));
+const loaded = vi.hoisted(() => ({ posthog: false, initAt: [] as string[] }));
 vi.mock("posthog-js", () => {
   loaded.posthog = true;
-  return { default: { init: vi.fn() } };
+  return {
+    default: {
+      // Where the URL was when PostHog started: its first $pageview reads it.
+      init: vi.fn(() => loaded.initAt.push(window.location.pathname)),
+    },
+  };
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.resetModules();
   loaded.posthog = false;
+  loaded.initAt = [];
   window.history.replaceState(null, "", "/");
 });
 
@@ -47,5 +53,17 @@ describe("instrumentation-client", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     mod.onRouterTransitionStart("/dashboard");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("after sign-in, starts only once the URL says /dashboard (no /sign-in pageview)", async () => {
+    const { mod } = await boot("/sign-in");
+    // (A path of its own: the test above left a start waiting for /dashboard.)
+    mod.onRouterTransitionStart("/dashboard/projects/p1");
+    await new Promise((r) => setTimeout(r, 120));
+    // The router hasn't changed the URL yet: PostHog waits.
+    expect(loaded.initAt).toEqual([]);
+    window.history.pushState(null, "", "/dashboard/projects/p1");
+    await new Promise((r) => setTimeout(r, 120));
+    expect(loaded.initAt).toEqual(["/dashboard/projects/p1"]);
   });
 });
