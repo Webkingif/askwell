@@ -335,6 +335,7 @@ describe("grants and helpers (project.md §9 Database API)", () => {
     expect(r.rows).toEqual([
       { proname: "consume_message", prosecdef: false },
       { proname: "create_project", prosecdef: false },
+      { proname: "list_conversations", prosecdef: false },
       { proname: "match_chunks", prosecdef: false },
       { proname: "owned_conversation_ids", prosecdef: true },
       { proname: "owned_project_ids", prosecdef: true },

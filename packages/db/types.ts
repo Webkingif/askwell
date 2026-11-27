@@ -276,6 +276,17 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      list_conversations: {
+        Args: { p_limit?: number; p_project_id: string }
+        Returns: {
+          created_at: string
+          id: string
+          last_message_at: string
+          message_count: number
+          preview: string
+          visitor_id: string
+        }[]
+      }
       match_chunks: {
         Args: { p_count?: number; p_embedding: string; p_project_id: string }
         Returns: {
